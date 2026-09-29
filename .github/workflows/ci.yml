@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 脚本自测（unittest）
+        run: python -m unittest discover -s tests -v
+      - name: 校验自带风格包（自包含性）
+        run: |
+          python scripts/validate_pack.py stylepacks/luxun
+          python scripts/validate_pack.py stylepacks/zhuziqing
+      - name: 单文件导出冒烟
+        run: |
+          python scripts/export_pack.py stylepacks/luxun --out /tmp/luxun.stylepack.md
+          python scripts/export_pack.py stylepacks/zhuziqing --out /tmp/zhuziqing.stylepack.md
+
+  windows-gbk:
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: cp936   # 强制最恶劣环境：CLI/MCP 必须自配 UTF-8 才能通过
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 脚本自测（unittest，GBK 管道）
+        run: python -m unittest discover -s tests -v
+      - name: GBK 下校验与导出冒烟（镜像 ubuntu job）
+        run: |
+          python scripts/validate_pack.py stylepacks/luxun
+          python scripts/validate_pack.py stylepacks/zhuziqing
+          python scripts/export_pack.py stylepacks/luxun --out smoke/luxun.stylepack.md
+          python scripts/export_pack.py stylepacks/zhuziqing --out smoke/zhuziqing.stylepack.md

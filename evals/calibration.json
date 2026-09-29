@@ -1,0 +1,59 @@
+{
+  "pack": "luxun",
+  "context": "v0.2.2 实测盲测：散文/杂文场景（无写作项目），按 style-calibrate 协议执行；裁判=项目作者，盲选界面不透露带包方",
+  "rounds": [
+    {
+      "date": "2026-09-29",
+      "prompt": "写一段冬天的集市",
+      "pack_version": "0.1.0",
+      "framework_version": "0.2.2",
+      "A_带包_盲标": "乙",
+      "B_不带包_盲标": "甲",
+      "winner": "A",
+      "notes": "用户选乙。指标挂数：带包 6/12 项 vs 不带包 8/12 项；Delta：带包 2.18 vs 不带包 2.04（Delta 在 ~500 字短文上偏噪，与指标门禁方向相反）"
+    },
+    {
+      "date": "2026-09-29",
+      "prompt": "写一段午后的茶馆",
+      "pack_version": "0.1.0",
+      "framework_version": "0.2.2",
+      "A_带包_盲标": "甲",
+      "B_不带包_盲标": "乙",
+      "winner": "A",
+      "notes": "用户选甲。指标挂数：带包 7/12 项 vs 不带包 9/12 项；Delta：带包 2.20 vs 不带包 1.98（同上，短文 Delta 噪声）"
+    }
+  ],
+  "win_rate": "2/2",
+  "win_rate_caveat": "n=2 远低于判读门槛，只记趋势不作结论；制度化应每卷/每30章续跑",
+  "cross_evidence": {
+    "长文校准点_Delta": {
+      "孔乙己_真小说": 0.871,
+      "秋夜_真散文": 1.036,
+      "文2_用包": 1.538,
+      "文1_凭印象": 1.694,
+      "匆匆_错作者": 2.355
+    },
+    "关键矛盾": "1200字文本上 Delta 排序完全正确（鉴别力成立）；500字盲测段上 Delta 排序反转（短文本不可靠）；量化门禁对散文全挂（真秋夜也挂9/12）而盲测带包全胜——量化与感知目前给出相反结论，门禁的文体偏差是唯一解释"
+  },
+  "stratified_recheck_v023": {
+    "真迹过线": {
+      "秋夜→luxun_essay": "PASS",
+      "风筝→luxun_essay": "PASS",
+      "孔乙己→luxun_narrative": "PASS(delta 1.011<=线)",
+      "故乡→luxun_narrative": "PASS",
+      "祝福→luxun_narrative": "PASS",
+      "背影→zhuziqing_essay": "PASS(delta 0.934)"
+    },
+    "错作者拒绝": {
+      "背影→luxun": "FAIL 6/11",
+      "匆匆→luxun": "FAIL 7/11",
+      "秋夜→zhuziqing": "FAIL 3/12"
+    },
+    "AI落位": {
+      "文1": "FAIL 5/11, delta参考1.67",
+      "文2": "FAIL 5/11, delta参考1.55"
+    },
+    "对比混合指纹时代": "真《秋夜》曾挂9/12，现在真迹全过、AI全不达标——验收恢复了判别力"
+  },
+  "framework_version": "0.2.3"
+}

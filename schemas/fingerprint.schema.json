@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/stylepack/schemas/fingerprint.schema.json",
+  "title": "StylePack fingerprint.json Schema v0.2",
+  "description": "风格指纹格式（作者无关）：顶层为全语料混合档案；genres 为按文体分层的档案（任意层名，当前约定 narrative/essay）；self_check 为层内真迹留一及格线。全部字段对任意作者的语料同构，无作者特化字段。",
+  "type": "object",
+  "required": ["metrics"],
+  "properties": {
+    "metrics": {
+      "$ref": "#/$defs/threshold_tree",
+      "description": "全语料混合阈值树（向后兼容层；分层包运行时 auto 模式优先用 genres 对应层）"
+    },
+    "reference": {
+      "type": "object",
+      "description": "建档时的完整实测快照（作者无关的统计存档）"
+    },
+    "notes": {
+      "type": ["string", "array"],
+      "description": "统计口径说明"
+    },
+    "delta_profile": {
+      "$ref": "#/$defs/delta_profile",
+      "description": "全语料混合 Burrows Delta 档案"
+    },
+    "genres": {
+      "type": "object",
+      "description": "按文体分层的档案；键为层名（当前约定 narrative/essay，v0.3 类型包可扩展），值同构",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["samples", "metrics"],
+        "properties": {
+          "samples": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "该层的语料样本名（章节/篇目）"
+          },
+          "chars_total": {"type": "number"},
+          "metrics": {"$ref": "#/$defs/threshold_tree"},
+          "delta_profile": {
+            "anyOf": [
+              {"$ref": "#/$defs/delta_profile"},
+              {"type": "null"}
+            ],
+            "description": "层内 Delta 档案；层内样本 n<3 时必须为 null（2 样本总体 std 下任意文本距离恒为常数，无判别力）"
+          }
+        }
+      }
+    },
+    "self_check": {
+      "type": "object",
+      "description": "层内留一真迹包络：delta_max = 真迹里最差一篇的留一距离，即该层 Delta 及格线",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["n", "delta_loo"],
+        "properties": {
+          "n": {"type": "integer", "minimum": 1},
+          "delta_loo": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "work": {"type": "string"},
+                "delta": {"type": ["number", "null"]},
+                "note": {"type": "string"}
+              }
+            }
+          },
+          "delta_max": {"type": ["number", "null"]},
+          "delta_p50": {"type": ["number", "null"]},
+          "note": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "threshold_tree": {
+      "type": "object",
+      "description": "阈值树：叶 = {target + tolerance_abs | tolerance_rel}；容差必须来自层内各篇实测散布（真迹留一验收），禁止无依据的固定比例。指标口径：叠词率仅统计相邻叠字（AA 型）；四字组为非重叠滑窗计数",
+      "additionalProperties": true
+    },
+    "delta_profile": {
+      "type": "object",
+      "required": ["chars", "n_samples", "top_n"],
+      "properties": {
+        "chars": {
+          "type": "object",
+          "description": "高频字 → [均值, 标准差]（次/千字）",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "n_samples": {"type": "integer", "minimum": 1},
+        "top_n": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

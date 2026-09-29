@@ -1,0 +1,52 @@
+{
+  "format_version": "0.1",
+  "name": "zhuziqing",
+  "display_name": "朱自清",
+  "language": "zh-CN",
+  "genres": [
+    "narrative",
+    "literary",
+    "essay"
+  ],
+  "version": "0.2.0",
+  "created": "2026-09-28",
+  "updated": "2026-09-29",
+  "corpus": {
+    "works": [
+      "背影",
+      "春",
+      "荷塘月色",
+      "匆匆"
+    ],
+    "total_chars": 4063,
+    "sampling": "全量（4 篇全文逐字统计，无抽样）",
+    "confidence": "中低：仅 4 篇散文共 4063 字，且不含小说叙事体——小说对话与情节推进请降低本包权重（见 limits.md）"
+  },
+  "provenance": [
+    {
+      "type": "web",
+      "url": "http://ccview.net/htm/xiandai/zzq/zzqsw002.htm",
+      "fetched_at": "2026-09-28",
+      "notes": "荷塘月色 / 背影 / 匆匆 三篇来源 ccview.net（GB2312→UTF-8，文字贴近 1925/1927 初版用语）；首选维基文库在本网络环境不可达。"
+    },
+    {
+      "type": "web",
+      "url": "https://github.com/BlueSky-07/Zi/blob/master/public/articles/chun-zhuziqing.txt",
+      "fetched_at": "2026-09-28",
+      "notes": "《春》来源公开教材文本仓库，与通行本交叉验证确认完整（原文约 750 字，非残缺）。"
+    }
+  ],
+  "license_note": "公版作者（1948 年逝世）。exemplars 为公版原文短引（每条 ≤200 字）加批注；本包不含任何全文。",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-09-28",
+      "changes": "初版：4 篇全文（4063 字）统计指纹 + 全文精读蒸馏 + 人工校订档案；10 项带容差指标。"
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-09-29",
+      "changes": "分层指纹：genres（narrative/essay 阈值树 + Delta 档案）+ self_check 层内真迹留一及格线；校准点入 evals Case F"
+    }
+  ]
+}

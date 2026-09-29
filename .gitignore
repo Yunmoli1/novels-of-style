@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# 用户本地语料（永不入库）
+corpus/
+*.txt
+!stylepacks/**/*.md
+
+# 状态机数据库（可随时由 story.py sync 重建）
+style/memory.db
+
+# 系统文件
+.DS_Store
+Thumbs.db

@@ -1,0 +1,48 @@
+{
+  "format_version": "0.1",
+  "name": "luxun",
+  "display_name": "鲁迅",
+  "language": "zh-CN",
+  "genres": [
+    "narrative",
+    "literary",
+    "short-story",
+    "essay"
+  ],
+  "version": "0.2.0",
+  "created": "2026-09-28",
+  "updated": "2026-09-29",
+  "corpus": {
+    "works": [
+      "故乡",
+      "孔乙己",
+      "秋夜",
+      "风筝",
+      "祝福"
+    ],
+    "total_chars": 19080,
+    "sampling": "全量（5 篇全文逐字统计，无抽样）",
+    "confidence": "中：短篇与散文诗代表样本，覆盖叙事与抒情两路；未含《阿Q正传》等中长篇，长篇结构节奏请参考 packs/narrative/REFERENCE.md"
+  },
+  "provenance": [
+    {
+      "type": "web",
+      "url": "https://github.com/Ac-heron/luxun/blob/b859e5043211b9ead7417ba3f5776e81eaf9213c/",
+      "fetched_at": "2026-09-28",
+      "notes": "《鲁迅全集》开源整理仓库（commit 固定）。首选维基文库在本网络环境不可达，改用此源。已去除代码围栏、注释区与行内脚注；源文本存极少量录入笔误，按保持原样原则未改动。"
+    }
+  ],
+  "license_note": "公版作者（1936 年逝世）。exemplars 为公版原文短引（每条 ≤200 字）加批注；本包不含任何全文。",
+  "changelog": [
+    {
+      "version": "0.1.0",
+      "date": "2026-09-28",
+      "changes": "初版：5 篇全文（19080 字）统计指纹 + 分层精读蒸馏 + 人工校订档案；12 项带容差指标。"
+    },
+    {
+      "version": "0.2.0",
+      "date": "2026-09-29",
+      "changes": "分层指纹：genres（narrative/essay 阈值树 + Delta 档案）+ self_check 层内真迹留一及格线；校准点入 evals Case F"
+    }
+  ]
+}

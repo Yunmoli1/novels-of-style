@@ -1,0 +1,70 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/stylepack/stylepack/schemas/stylepack.schema.json",
+  "title": "StylePack pack.json Schema v0.1",
+  "description": "自包含作者风格包的清单文件。配合 scripts/validate_pack.py 使用（后者还检查 schema 表达不了的语义约束：无悬空引用、引文长度等）。format_version 指 pack.json 结构版本（由本 schema 定义），与包内容版本 version 互不相干：指纹重建走 version 联动升版，pack.json 结构未变则 format_version 不动；指纹（含分层 genres/self_check）的结构契约见 fingerprint.schema.json。",
+  "type": "object",
+  "required": [
+    "format_version", "name", "display_name", "language", "genres",
+    "version", "created", "updated", "corpus", "provenance",
+    "license_note", "changelog"
+  ],
+  "properties": {
+    "format_version": {
+      "type": "string",
+      "description": "风格包格式版本，如 \"0.1\"",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "name": { "type": "string", "description": "包名（唯一标识，建议小写连字符）" },
+    "display_name": { "type": "string", "description": "展示名（作者/风格名）" },
+    "language": { "type": "string", "description": "主语言，如 zh-CN / en", "pattern": "^[a-z]{2}(-[A-Za-z]{2,})?$" },
+    "genres": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "适用类型标签，如 narrative / game / learning"
+    },
+    "version": {
+      "type": "string",
+      "description": "包版本（semver）",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "created": { "type": "string", "format": "date" },
+    "updated": { "type": "string", "format": "date" },
+    "corpus": {
+      "type": "object",
+      "required": ["works", "total_chars", "sampling", "confidence"],
+      "properties": {
+        "works": { "type": "array", "items": { "type": "string" } },
+        "total_chars": { "type": "integer", "minimum": 0 },
+        "sampling": { "type": "string", "description": "采样方式：全文 / 分层抽样（说明比例）" },
+        "confidence": { "type": "string", "description": "置信度自评：高/中/低 + 一句理由" }
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "type": "string", "enum": ["upload", "web"] },
+          "url": { "type": "string" },
+          "fetched_at": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "license_note": { "type": "string", "description": "版权说明，如：公版作者，范例为短引" },
+    "changelog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["version", "date", "changes"],
+        "properties": {
+          "version": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "changes": { "type": "string" }
+        }
+      }
+    }
+  }
+}
