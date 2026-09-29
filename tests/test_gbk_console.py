@@ -22,12 +22,17 @@ GBK_ENV = {k: v for k, v in os.environ.items()
            if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
 GBK_ENV["PYTHONIOENCODING"] = "cp936"
 
+# 本模块测的是 Windows cp936 控制台行为（含反斜杠路径拼接），仅 Windows 实跑；
+# linux CI（locale 本就是 UTF-8，无 cp936 控制台问题）跳过
+IS_WINDOWS = os.name == "nt"
+
 
 def _run(args, **kw):
     return subprocess.run(args, env=GBK_ENV, capture_output=True,
                           text=True, encoding="utf-8", errors="replace", **kw)
 
 
+@unittest.skipUnless(IS_WINDOWS, "cp936 控制台行为仅 Windows，非 Windows 跳过")
 class TestGBKConsole(unittest.TestCase):
     def test_validate_pack_entry_no_crash(self):
         """validate_pack.main() 入口路径（P2：旧测试只覆盖 check_pack）。"""
@@ -79,6 +84,7 @@ class TestGBKConsole(unittest.TestCase):
             self.assertFalse(resp2["result"].get("isError"), resp2)
 
 
+@unittest.skipUnless(IS_WINDOWS, "cp936 控制台行为仅 Windows，非 Windows 跳过")
 class TestGBKSmokeAllCLI(unittest.TestCase):
     """v0.2.6 收口：每个 CLI 在 GBK 管道下真实实跑，断言关键词而非只看 rc——
     errors=replace 会把编码错误吞成乱码而非崩溃，仅看 rc 会漏判。"""
