@@ -9,7 +9,7 @@
     "short-story",
     "essay"
   ],
-  "version": "0.2.0",
+  "version": "0.2.1",
   "created": "2026-09-28",
   "updated": "2026-09-29",
   "corpus": {
@@ -43,6 +43,11 @@
       "version": "0.2.0",
       "date": "2026-09-29",
       "changes": "分层指纹：genres（narrative/essay 阈值树 + Delta 档案）+ self_check 层内真迹留一及格线；校准点入 evals Case F"
+    },
+    {
+      "version": "0.2.1",
+      "date": "2026-09-29",
+      "changes": "分层指纹重建"
     }
   ]
 }
