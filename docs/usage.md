@@ -23,7 +23,7 @@
 ## 1. 环境要求
 
 - **Python 3.8+**（仅标准库，无需 `pip install` 任何东西）
-- 一个 AI agent 宿主（可选但推荐）：ZCode / Claude Code 等；
+- 一个 AI agent 宿主（可选但推荐）：支持 Agent Skills 目录与/或 MCP 即可；
   没有宿主也能用单文件包（见 §3 路线 C）
 - 磁盘上任意位置存放本仓库；写作项目与仓库可以分开
 - **编码说明**：CLI 与 MCP 恒以 UTF-8 字节输出，stdin 亦按 UTF-8 严格解析
@@ -33,14 +33,13 @@
 
 ## 2. 安装
 
-按你的宿主选择（详细步骤见 `docs/adapters/` 对应文件）：
+按你的宿主能力选择（**各宿主的具体路径与步骤集中在 `docs/adapters/`**）：
 
-| 宿主 | 做法 |
+| 宿主能力 | 做法 |
 |---|---|
-| ZCode | 复制 `core/skills/*` 到 `<工作区>/.zcode/skills/`（工作区级）或 `~/.zcode/skills/`（用户级） |
-| Claude Code | 复制 `core/skills/*` 到 `<项目>/.claude/skills/` 或 `~/.claude/skills/` |
-| Cursor | 用 Rules/AGENTS.md 指向本仓库技能文件；或直接用单文件包 |
-| 其他 / 无宿主 | 仓库克隆下来，agent 读 `docs/usage.md` 与各 SKILL.md；或只用单文件包 |
+| 支持 Agent Skills（SKILL.md） | 复制 `core/skills/*` 到宿主的技能目录（工作区级或用户级；路径见 adapters） |
+| 支持 MCP | 在宿主的 MCP 配置中指向 `server/mcp_server.py`（见 [docs/adapters/mcp.md](adapters/mcp.md)） |
+| 都不支持 / 任意环境 | 用单文件包（`export` 产物贴进对话即用），或让 agent 直接读 `docs/usage.md` 与各 SKILL.md |
 
 安装后重开一个会话让技能被发现。验证：对 agent 说「用 stylepack 帮我建个写作工作区」。
 
@@ -61,7 +60,7 @@ python scripts/export_pack.py stylepacks/luxun --out luxun.stylepack.md
 
 > 按这份文风档案写一段 200 字：冬天清晨的校园。
 
-### 路线 B：有 ZCode / Claude Code，直接开写（自带包）
+### 路线 B：有 agent 宿主，直接开写（自带包）
 
 对 agent 说：
 
@@ -188,7 +187,7 @@ my-novel/
 ## 8. 常见问题
 
 **Q：技能没有触发？**
-确认复制到了正确目录（`.zcode/skills/` 或 `~/.zcode/skills/`）、重开了会话；
+确认复制到了宿主的技能目录（各宿主路径见 docs/adapters/）、重开了会话；
 同名技能先发现先加载，检查是否被旧版本遮蔽。
 
 **Q：语料是 GBK 编码 / 乱码？**
@@ -230,7 +229,7 @@ v0.1 用免依赖的字级统计（句长、标点、叠词、字频、四字组
 
 ## 9. 清理与卸载
 
-- 卸载技能：删除 `<工作区>/.zcode/skills/` 或 `~/.zcode/skills/` 下对应目录
+- 卸载技能：删除宿主技能目录（各宿主路径见 docs/adapters/）下对应条目
 - 删除项目：写作项目目录是普通文件夹，直接删除
 - 删除风格包：删除 `stylepacks/<包名>/`
 - 仓库本身：删除克隆目录即可，无注册表/全局状态残留
