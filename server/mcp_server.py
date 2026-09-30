@@ -126,6 +126,12 @@ class MCPServer:
             return {"error": f"找不到风格包：{name}",
                     "available": [self._pack_brief(p) for p in dirs]}
         info = json.loads((base / "pack.json").read_text(encoding="utf-8"))
+        # MCP 返回纪律 ≤2KB：changelog 随包增长必然撑爆 info 载荷，
+        # 只保留最新一条供模型了解当前版本
+        cl = info.get("changelog") or []
+        if cl:
+            info["changelog_latest"] = cl[-1]
+        info.pop("changelog", None)
         fp = base / "fingerprint.json"
         info["has_delta_profile"] = False
         if fp.is_file():

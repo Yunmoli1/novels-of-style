@@ -154,7 +154,13 @@ my-novel/
 ## 6. 风格包管理
 
 - **结构**：每个包 7 个必备文件（pack.json / card.md / profile.md / fingerprint.json /
-  exemplars.md / lexicon.md / limits.md），可选 tests/（盲测题）
+  exemplars.md / lexicon.md / limits.md），可选 registers.md（调子分区）与 tests/（盲测题）
+- **调子分区（可选，R0）**：registers.md 把语料按情感轴（散文）与节奏轴（叙事）
+  分成 2–4 个调子（如鲁迅：沉郁哲思 / 冷峻讽刺 / 温情回忆 / 对话场 / 白描场 /
+  抒情场）；exemplars 每条的「调子：」行与 registers 的示范段路由互为镜像
+  （validate 校验六项：引用完整性 / 值域 / 查重 / 注入 / 引文长度 / 双向一致）。
+  写作时在拍子确认里**声明本章调子**，示范段即按该分区路由——只影响上下文
+  选择，不参与验收判定；验收端指纹分区（--stratum）属后续版本
 - **自包含是硬约束**：`validate_pack` 拦截包外链接与超长引文（≤200 字）；
   CI 对自带包全量校验
 - **单文件**：`export` 产物贴进任何对话即用；分享/PR 以单文件或整个目录为单位

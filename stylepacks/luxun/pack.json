@@ -9,20 +9,20 @@
     "short-story",
     "essay"
   ],
-  "version": "0.2.1",
+  "registers": true,
+  "version": "0.3.0",
   "created": "2026-09-28",
-  "updated": "2026-09-29",
+  "updated": "2026-09-30",
   "corpus": {
     "works": [
-      "故乡",
-      "孔乙己",
-      "秋夜",
-      "风筝",
-      "祝福"
+      "呐喊（15 篇）",
+      "彷徨（11 篇）",
+      "野草（24 篇）",
+      "朝花夕拾（12 篇）"
     ],
-    "total_chars": 19080,
-    "sampling": "全量（5 篇全文逐字统计，无抽样）",
-    "confidence": "中：短篇与散文诗代表样本，覆盖叙事与抒情两路；未含《阿Q正传》等中长篇，长篇结构节奏请参考 packs/narrative/REFERENCE.md"
+    "total_chars": 208039,
+    "sampling": "全量（62 篇全文逐字统计，无抽样）",
+    "confidence": "中高：四部创作集全量（20.8 万字），覆盖叙事与散文诗/回忆散文两路，narrative 层 n=36 / essay 层 n=26；未含杂文集，杂文调子请勿用本包"
   },
   "provenance": [
     {
@@ -48,6 +48,11 @@
       "version": "0.2.1",
       "date": "2026-09-29",
       "changes": "分层指纹重建"
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-09-30",
+      "changes": "R0 调子分区：新增 registers.md（情感轴 3 分区 / 节奏轴 3 分区，61 篇标注 + 1 篇除名）+ exemplars 全部条目加调子行 + 新增示范段 11（温情回忆·从百草园到三味书屋）、12（冷峻讽刺·父亲的病）；corpus 元数据对齐 62 篇（v0.2.8 遗留缺口）；示范段路由供 style-apply / writing 按声明调子选用，验收端指纹分区属后续版本"
     }
   ]
 }

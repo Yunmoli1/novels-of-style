@@ -2,6 +2,36 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.2.9] - 2026-09-30
+
+### Added
+- **调子分区 registers.md（R0）**：luxun 包新增可选文件——情感轴 3 分区
+  （沉郁哲思 11 / 冷峻讽刺 9 / 温情回忆 7）+ 节奏轴 3 分区（对话场 20 /
+  白描场 7 / 抒情场 7），61 篇逐篇标注主/次调子 + 一句依据；朝花夕拾·后记
+  除名（考据跋文自述声口稀薄，不适配任何调子）。写作时按**声明的调子**
+  路由示范段——只影响上下文选择，不参与验收判定（验收端指纹分区
+  `--stratum` 属后续版本）
+- exemplars.md 全部 12 条带「调子：」机器可读行，与 registers 示范段路由
+  互为镜像；新增示范段 11（温情回忆·《从百草园到三味书屋》）、
+  12（冷峻讽刺·《父亲的病》），六个分区均有示范段
+- validate_pack 新增 registers 六项校验：引用完整性 / 调子值域 / 跨文件
+  查重（分区名 vs profile 章节 vs 范例标题）/ 注入扫描覆盖 / 引文 ≤200 字 /
+  双向一致；pack.json 增可选能力标记 `registers`
+- export_pack 条件段机制：包内有 registers.md 才并入「调子分区」节
+  （定位断言锁定正文区段），无则导出与旧版完全一致；v0.3 的 thought.md
+  将复用同一机制
+- tests/test_registers.py：14 项正负例（luxun 副本变异法）
+
+### Changed
+- MCP `stylepack.info` 返回的 info 载荷中 changelog 只保留最新一条：
+  changelog 随包增长必然撑爆 2KB 返回纪律（luxun 0.3.0 实测触发
+  truncated，结构性问题而非个例）
+- pack.json corpus 元数据对齐 62 篇现实（v0.2.8 遗留缺口：仍列 5 篇
+  19080 字）→ 集级条目 + 208,039 字 + 置信度更新；pack.json 0.2.1→0.3.0
+- 技能路由：style-apply 拍子确认增加**调子声明位**、示范段按声明调子的
+  分区挑选；writing 轻模式按请求中的调子词路由；`.zcode/skills/` 与
+  `core/skills/` 双副本同步
+
 ## [0.2.8] - 2026-09-29
 
 ### Added

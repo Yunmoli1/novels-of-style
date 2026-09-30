@@ -25,6 +25,12 @@ SECTIONS = [
     ("limits.md", "能力边界"),
 ]
 
+# registers.md 为可选条件段（R0）：包内有则并入（插在「范例」之后），
+# 无则完全保持既有五段导出不变。v0.3 的 thought.md 将复用同一机制。
+CONDITIONAL_SECTIONS = [
+    (3, "registers.md", "调子分区"),
+]
+
 PREAMBLE = (
     "你是使用本风格包的写作助手。以下资料完整描述了一位作者的文风，"
     "请在写作时严格遵循「完整档案」的指导、「词汇与句式」的用词习惯、"
@@ -61,7 +67,12 @@ def main() -> int:
     out.append(f"> {PREAMBLE}")
     out.append("")
 
-    for fname, title in SECTIONS:
+    sections = list(SECTIONS)
+    for pos, fname, title in CONDITIONAL_SECTIONS:
+        if (pack_dir / fname).is_file():
+            sections.insert(pos, (fname, title))
+
+    for fname, title in sections:
         body = _strip_h1((pack_dir / fname).read_text(encoding="utf-8"))
         out.append(f"## {title}")
         out.append("")

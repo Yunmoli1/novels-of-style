@@ -13,7 +13,16 @@
   E. fingerprint.json 至少 5 个带 target+容差的指标叶
   F. 无悬空引用：md 内不允许指向包外（../ 或绝对路径）的链接；
      正文不允许出现 corpus/ 语料路径引用
+  F2. 语义注入启发式（命中给警告）
   G. profile.md 章节骨架齐全（缺章节给警告，不算失败）
+  H. registers.md 调子分区（可选文件；存在则校验 (a)-(f)）：
+     (a) 引用完整性——路由引用的示范段编号必须在 exemplars.md 存在
+     (b) 调子值域——exemplars「调子：」行的值必须在分区定义内；
+         无 registers.md 却出现调子行 = 错误
+     (c) 跨文件查重——分区名 vs profile 章节名 vs exemplars 条目标题
+     (d) 注入启发式已由 F2 的 rglob("*.md") 覆盖 registers.md
+     (e) registers.md 引文 ≤200 字
+     (f) 双向一致——exemplars 调子行与 registers 示范段路由互为镜像
 退出码：0 = 通过；1 = 存在错误。
 """
 from __future__ import annotations
@@ -28,6 +37,11 @@ import splib  # noqa: E402
 
 BAD_LINK_RE = re.compile(r"\]\((\.\.?/|/|[A-Za-z]:)[^)]*\)")
 CORPUS_REF_RE = re.compile(r"(corpus/|语料库/|\.\./chapters/)")
+
+# registers.md（R0 调子分区）解析用
+REGISTER_HEADING_RE = re.compile(r"^####\s+(.+?)\s*$", re.M)
+ROUTE_REF_RE = re.compile(r"示范段\s*(\d+)")
+TONE_LINE_RE = re.compile(r"^调子[:：]\s*(.+?)\s*$", re.M)
 
 # 语义注入启发式：包文件会进入宿主上下文，指令型语句视为供应链风险线索。
 # 命中只给警告（可能误伤文学文本），放行前必须人工复核。
@@ -153,7 +167,104 @@ def check_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
             if section not in text:
                 warns.append(f"profile.md 缺少章节：「{section}」")
 
+    # H. registers.md 调子分区（R0 新落机制，见模块 docstring）
+    _check_registers(pack_dir, errors, warns)
+
     return errors, warns
+
+
+def _parse_exemplars(text: str) -> list[tuple[str, str, str | None]]:
+    """解析 exemplars.md 条目 → [(编号, 标题, 调子值或 None)]。"""
+    out: list[tuple[str, str, str | None]] = []
+    for entry in re.split(r"^###\s+", text, flags=re.M)[1:]:
+        lines = entry.splitlines()
+        title = lines[0].strip() if lines else "?"
+        m = re.match(r"^(\d+)\.", title)
+        tm = TONE_LINE_RE.search(entry)
+        out.append((m.group(1) if m else "", title, tm.group(1).strip() if tm else None))
+    return out
+
+
+def _check_registers(pack_dir: Path, errors: list[str], warns: list[str]) -> None:
+    reg_path = pack_dir / "registers.md"
+    ex_path = pack_dir / "exemplars.md"
+    ex_tones: list[tuple[str, str, str | None]] = []
+    if ex_path.is_file():
+        ex_tones = _parse_exemplars(ex_path.read_text(encoding="utf-8"))
+
+    def _pack_json() -> dict | None:
+        pj_path = pack_dir / "pack.json"
+        if not pj_path.is_file():
+            return None
+        try:
+            return splib.load_json(pj_path)
+        except Exception:  # noqa: BLE001
+            return None
+
+    if not reg_path.is_file():
+        if any(t for _, _, t in ex_tones):
+            errors.append("exemplars.md 出现「调子：」行，但包内缺少 registers.md")
+        pj = _pack_json()
+        if pj is not None and pj.get("registers"):
+            errors.append("pack.json 声明 registers: true，但包内缺少 registers.md")
+        return
+
+    text = reg_path.read_text(encoding="utf-8")
+    regs = [r.strip() for r in REGISTER_HEADING_RE.findall(text)]
+
+    # (c) 跨文件查重：分区名 vs profile 章节名 vs exemplars 条目标题
+    clash_pool = list(splib.PROFILE_SECTIONS) + [title for _, title, _ in ex_tones]
+    for r in regs:
+        for other in clash_pool:
+            if r and other and (r == other or r in other or other in r):
+                errors.append(f"registers.md 分区名「{r}」与既有名称「{other}」重复（跨文件查重）")
+                break
+
+    # (a) 引用完整性：路由引用的示范段编号必须存在于 exemplars.md
+    ex_nums = {num for num, _, _ in ex_tones if num}
+    for num in ROUTE_REF_RE.findall(text):
+        if num not in ex_nums:
+            errors.append(f"registers.md 引用的示范段 {num} 在 exemplars.md 中不存在")
+
+    # (e) 引文 ≤200 字
+    for quote in re.findall(r"^>\s?(.*)$", text, flags=re.M):
+        q = quote.strip().strip("》>").strip()
+        if len(q) > 200:
+            errors.append(f"registers.md 引文超 200 字（{len(q)}），违反短引纪律")
+
+    # 解析示范段路由节：分区名 → 编号集合
+    routing: dict[str, set[str]] = {}
+    m = re.search(r"^##\s+示范段路由\s*$", text, flags=re.M)
+    if m:
+        route_text = re.split(r"^##\s+", text[m.end():], flags=re.M)[0]
+        for sub in re.split(r"^###\s+", route_text, flags=re.M)[1:]:
+            lines = sub.splitlines()
+            routing[lines[0].strip() if lines else "?"] = set(ROUTE_REF_RE.findall(sub))
+
+    # (b) 调子值域 + (f) 双向一致（正向：调子行 → 路由节；反向：路由节 → 调子行）
+    for num, title, tone in ex_tones:
+        if tone is None:
+            continue
+        if tone not in regs:
+            errors.append(f"exemplars.md 范例「{title}」调子「{tone}」未在 registers.md 分区定义中出现")
+        elif num and num not in routing.get(tone, set()):
+            errors.append(f"exemplars.md 范例 {num}（调子 {tone}）未列入 registers.md 示范段路由「{tone}」")
+    for name, nums in routing.items():
+        if name not in regs:
+            errors.append(f"registers.md 示范段路由「{name}」未在分区定义中出现")
+        for num in sorted(nums):
+            match = [t for n, _, t in ex_tones if n == num]
+            if not match:
+                continue  # 已由 (a) 报错
+            if match[0] is None:
+                errors.append(f"registers.md 路由「{name}」列出示范段 {num}，但该示范段未标注调子")
+            elif match[0] != name:
+                errors.append(f"registers.md 路由「{name}」列出示范段 {num}，但该示范段调子为「{match[0]}」")
+
+    # 能力标记互证：文件在而标记缺 → 警告（标记在而文件缺已在前分支报错）
+    pj = _pack_json()
+    if pj is not None and not pj.get("registers"):
+        warns.append("包内有 registers.md，建议在 pack.json 声明 \"registers\": true 能力标记")
 
 
 def main() -> int:
