@@ -13,3 +13,9 @@ style/memory.db
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# 用户写作项目（工作区级，永不入库——含成本账本/手稿/设定）
+# 建议：项目放仓库目录外；此处显式列出已知项目 + 账本通配
+fanqie-terraria/
+指挥官零/
+*/style/cost.jsonl

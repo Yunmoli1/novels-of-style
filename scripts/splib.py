@@ -36,6 +36,47 @@ PROFILE_SECTIONS = [
     "禁用清单",
 ]
 
+# v0.3 思想层：thought.md（可选包文件）。六节为模型蒸馏内容；
+# motif_stats 节由 motif_count.py 脚本产出（advisory，永不进判定）。
+THOUGHT_SECTIONS = [
+    "选题地平线",
+    "立意动作",
+    "观察清单",
+    "意象系统",
+    "价值姿态",
+    "禁区",
+]
+MOTIF_STATS_SECTION = "motif_stats"
+MOTIF_LIST_RE = re.compile(r"^motif 词表[:：]\s*(.+?)\s*$", re.M)
+
+
+def parse_motif_list(thought_text: str) -> list[str]:
+    """从 thought.md 的「motif 词表：」行解析词项（、/，/, 分隔）。"""
+    m = MOTIF_LIST_RE.search(thought_text)
+    if not m:
+        return []
+    return [w.strip() for w in re.split(r"[、，,\s]+", m.group(1)) if w.strip()]
+
+
+def parse_motif_stats(thought_text: str) -> dict[str, float]:
+    """解析 thought.md motif_stats 节的 | motif | 次/千字 | 表。"""
+    m = re.search(rf"^##\s+{MOTIF_STATS_SECTION}\s*$", thought_text, flags=re.M)
+    if not m:
+        return {}
+    stats: dict[str, float] = {}
+    body = re.split(r"^##\s+", thought_text[m.end():], flags=re.M)[0]
+    for name, rate in re.findall(r"^\|\s*([^|\s]+)\s*\|\s*([\d.]+)\s*\|$", body, flags=re.M):
+        stats[name] = float(rate)
+    return stats
+
+
+def count_motifs(text: str, motifs: list[str]) -> dict[str, float]:
+    """各 motif 在文本中的频率（次/千字）。纯子串计数——advisory 用途，
+    任何基于它的判定都属古德哈特面，故此函数只服务参考输出。"""
+    if not text:
+        return {w: 0.0 for w in motifs}
+    return {w: round(text.count(w) / len(text) * 1000, 3) for w in motifs}
+
 CJK = r"\u4e00-\u9fff"
 CJK_RE = re.compile(rf"[{CJK}]")
 
@@ -62,7 +103,9 @@ AD_PATTERNS = [
 ]
 
 CHAPTER_RE = re.compile(
-    r"^\s*(?:"
+    r"^\s*(?!"
+    r".*[。”]\s*$"          # 以引号/句号收尾的是正文回顾句，不是章节标题
+    r")(?:"
     r"第\s*[0-9〇零一二三四五六七八九十百千万两]+\s*[章回节卷部篇][^\n]{0,40}"
     r"|Chapter\s+\d+[^\n]{0,60}"
     r"|(?:序章|楔子|引子|尾声|后记|终章|番外)[^\n]{0,30}"

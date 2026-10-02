@@ -12,7 +12,7 @@ description: 以独立审计者身份对照风格包逐条批改文本：节奏�
 
 ## 输入
 
-1. 项目钉扎的风格包（profile + exemplars + lexicon + limits）
+1. 项目钉扎的风格包（profile + exemplars + lexicon + limits；含 thought.md 时一并载入）
 2. 待批改文本（单章或若干章）
 
 ## 成本纪律（硬性）
@@ -35,6 +35,7 @@ description: 以独立审计者身份对照风格包逐条批改文本：节奏�
 | 对话风格 | profile「对话风格」+ characters.md | 人物声线混淆、对话信息过载、说破潜台词 |
 | 场景与结构 | profile「场景与结构」 | 转场生硬、开头承接断裂、结尾无钩子 |
 | 情感与氛围 | profile「情感与氛围」+ limits | 情绪直说而非外化、抒情过度 |
+| 思想层（v0.3，包含 thought.md 时） | thought.md | 选题像不像 / 立意招式是否同族 / 细节是否出自观察清单 / **贴标签检测**——motif 出现但与叙事无机的段落点名（意象硬塞） |
 
 ## 意见格式（每条）
 

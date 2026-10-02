@@ -147,13 +147,15 @@ my-novel/
 | cost.py | 成本账本（记账/出账/预测） | `python scripts/cost.py log --skill style-analyze --chars 32000`；`cost.py report`；`cost.py forecast --chapters-total 100` |
 | story.py | 状态机 CLI（MCP 的等价物） | `python scripts/story.py sync`；`story.py search --query 玉佩`；`story.py recap` |
 | build_delta.py | 构建 Burrows Delta 档案 | `python scripts/build_delta.py corpus/luxun --pack stylepacks/luxun` |
+| motif_count.py | thought.md motif 词表验证 | `python scripts/motif_count.py corpus/luxun --pack stylepacks/luxun --write`（advisory，不进判定） |
 
 退出码约定：0 成功 / 1 未通过（脚本可进 CI）/ 2 用法错误。
 
 ## 6. 风格包管理
 
 - **结构**：每个包 7 个必备文件（pack.json / card.md / profile.md / fingerprint.json /
-  exemplars.md / lexicon.md / limits.md），可选 registers.md（调子分区）与 tests/（盲测题）
+  exemplars.md / lexicon.md / limits.md），可选 registers.md（调子分区）、
+  thought.md（思想档案）与 tests/（盲测题）
 - **调子分区（可选，R0）**：registers.md 把语料按情感轴（散文）与节奏轴（叙事）
   分成 2–4 个调子（如鲁迅：沉郁哲思 / 冷峻讽刺 / 温情回忆 / 对话场 / 白描场 /
   抒情场）；exemplars 每条的「调子：」行与 registers 的示范段路由互为镜像

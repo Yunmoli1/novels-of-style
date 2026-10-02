@@ -2,6 +2,40 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.3.0] - 2026-09-30
+
+### Added
+- **思想层 thought.md（v0.3 主体）**：可选包文件，六节骨架——选题地平线 /
+  立意动作 / 观察清单 / 意象系统 / 价值姿态 / 禁区。蒸馏对象是**思路的动作**
+  （选题偏好、立意招式、观察习惯、可执行姿态指令），不是思想的内容；全部
+  条目须指认 exemplars 编号或语料篇目，不能溯源的删除
+- **luxun / zhuziqing thought.md 定稿**（用户逐节校订通过）：luxun 立意动作
+  10 招 + 价值姿态 9 条（全部指令化，如"叙述者后退半步，让事实并置，禁直接
+  评判"）+ 禁区 9 条；zhuziqing 各节**置信度逐节标注**（语料仅 4 篇，
+  回避 / 禁区为弱禁用）
+- **motif_count.py**：验证 thought.md 提案词表的语料频率（递归收集 *.txt/*.md），
+  低于剔除线自动剔除，--write 写回 motif_stats 节 + pack.json 版本联动——
+  提案是模型的，数字是脚本的（防幻觉意象）
+- **fp_check --thought**：输出 motif 密度对照——**advisory，不进判定、
+  不影响退出码**（测试锁定）；思想特征全部可 Goodhart（意象可堆砌），
+  故永不升级为通过性指标
+- **format_version 0.1 → 0.2**：schema 增 thought / registers 可选能力标记，
+  可选文件缺失时全流程照常（向后兼容）
+- 四技能更新（双副本）：style-analyze 思想四问（一次精读两份产出）、
+  style-apply 两级共创（立意确认 → 拍子表）+ **交付声明制**、style-critique
+  思想维度 + 贴标签检测、style-calibrate 思想盲测（同题材两问，判读问题 =
+  "哪篇更像这个作者在思考"）
+- tests/test_thought.py（13 项）+ TestGenericAuthorPipeline.test_thought_layer_cli
+  （任意作者思想步端到端）；evals Case I
+
+### Changed
+- **motif 剔除线按语料规模校正**：1.5/千字为小语料防幻觉线；luxun 20.8 万字
+  语料实测仅剩 3 词（月/夜/死全被杀）→ 校正为 0.5/千字（防幻觉功能不变：
+  ≥0.5 即 ≥104 次出现），"头"因方位词复合流量污染计数手动剔除；
+  luxun 词表 12 词、zhuziqing 10 词（全部过线）
+- pack.json：luxun 0.3.0→0.4.0、zhuziqing 0.2.0→0.3.0（thought 能力声明）
+- validate 对无 thought.md 的包给 1 条提示（沿计划 §6.1：0 警告升级为 1 条提示）
+
 ## [0.2.9] - 2026-09-30
 
 ### Added

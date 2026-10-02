@@ -1,5 +1,5 @@
 {
-  "format_version": "0.1",
+  "format_version": "0.2",
   "name": "zhuziqing",
   "display_name": "朱自清",
   "language": "zh-CN",
@@ -8,9 +8,9 @@
     "literary",
     "essay"
   ],
-  "version": "0.2.0",
+  "version": "0.3.0",
   "created": "2026-09-28",
-  "updated": "2026-09-29",
+  "updated": "2026-09-30",
   "corpus": {
     "works": [
       "背影",
@@ -47,6 +47,12 @@
       "version": "0.2.0",
       "date": "2026-09-29",
       "changes": "分层指纹：genres（narrative/essay 阈值树 + Delta 档案）+ self_check 层内真迹留一及格线；校准点入 evals Case F"
+    },
+    {
+      "version": "0.3.0",
+      "date": "2026-09-30",
+      "changes": "thought.md 思想层（v0.3）：六节蒸馏（置信度逐节标注，语料仅 4 篇，回避/禁区为弱禁用）+ motif 词表 10 词与 motif_stats；经用户逐节校订定稿（2026-09-30，全按草案）"
     }
-  ]
+  ],
+  "thought": true
 }

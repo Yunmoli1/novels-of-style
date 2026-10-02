@@ -34,9 +34,9 @@ Full guide: [docs/usage.md](docs/usage.md) (Chinese; adapters in docs/adapters/)
 
 ## Roadmap
 
-v0.2 (current): MCP memory layer, layered fingerprints & genuine-range envelopes (Burrows Delta),
-corpus expansion & cross-pack attribution, register partitioning with exemplar routing ·
-v0.3 (planned): thought layer — thought.md distills "how the author thinks" (idea moves, motif
-system, stance) · later: acceptance-side registers (--stratum), cross-author style zones, genre packs.
+v0.3 (current): thought layer — thought.md distills "how the author thinks" (idea moves,
+observation lists, stance, motif system; script-verified motifs, advisory only) with
+two-stage co-creation and delivery declaration ·
+later: acceptance-side registers (--stratum), cross-author style zones, genre packs.
 
 License: [Apache-2.0](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) — copyright discipline applies: the repo never hosts copyrighted full texts; exemplars are short annotated quotes only.

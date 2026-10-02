@@ -97,6 +97,9 @@ def main() -> int:
                     help="上次实测指标存档，逐指标对比回归")
     ap.add_argument("--delta-max", type=float, default=None,
                     help="显式覆盖 Delta 及格线（默认用层内真迹留一线）")
+    ap.add_argument("--thought", action="store_true",
+                    help="输出 thought.md motif 密度对照（advisory：仅供判读参考，"
+                         "不进判定、不影响退出码）")
     args = ap.parse_args()
 
     pack_dir = Path(args.pack)
@@ -111,6 +114,7 @@ def main() -> int:
         return 2
 
     results = []
+    label_texts: list[tuple[str, str]] = []
     if args.per_file:
         if args.save_metrics or args.baseline_path:
             print("提示：--save-metrics/--baseline 仅支持合并模式，本次已忽略", file=sys.stderr)
@@ -119,6 +123,7 @@ def main() -> int:
             res = splib.layered_check(text, fingerprint, genre=args.genre,
                                       delta_max_override=args.delta_max)
             results.append((f.name, res["rows"], None, res))
+            label_texts.append((f.name, text))
     else:
         parts = [splib.read_text(f)[0] for f in files]
         text = "\n\n".join(parts)
@@ -137,6 +142,7 @@ def main() -> int:
             splib.dump_json(res["metrics"], args.save_metrics)
             print(f"    实测指标已存档：{args.save_metrics}")
         results.append((f"合并 {len(files)} 个文件", rows, diffs, res))
+        label_texts.append((f"合并 {len(files)} 个文件", text))
 
     for label, rows, _, res in results:
         ok = splib.all_ok(rows)
@@ -149,6 +155,26 @@ def main() -> int:
             act = "缺失" if r["actual"] is None else r["actual"]
             print(f"    {r['path']}: 目标 {r['target']}，实际 {act}"
                   + (f"，容差 {r['tolerance']}" if r["tolerance"] is not None else ""))
+
+    # 思想层 advisory（v0.3）：motif 密度对照。永不改变 ok / 退出码。
+    if args.thought:
+        thought_path = pack_dir / "thought.md"
+        if not thought_path.is_file():
+            print("提示（--thought）：包无 thought.md，无 motif 对照可输出")
+        else:
+            ttext = thought_path.read_text(encoding="utf-8")
+            motifs = splib.parse_motif_list(ttext)
+            corpus_rates = splib.parse_motif_stats(ttext)
+            if not motifs:
+                print("提示（--thought）：thought.md 缺少「motif 词表：」行")
+            else:
+                print("motif 密度对照（advisory——意象可堆砌，仅供判读参考，不进判定；单位 次/千字）：")
+                for label, txt in label_texts:
+                    rates = splib.count_motifs(txt, motifs)
+                    cells = "；".join(
+                        f"{w} 语料 {corpus_rates.get(w, 0.0):.2f} vs 本文 {rates[w]:.2f}"
+                        for w in motifs)
+                    print(f"    [{label}] {cells}")
 
     overall = all(splib.all_ok(rows) for _, rows, _, _ in results)
     if args.json_out:

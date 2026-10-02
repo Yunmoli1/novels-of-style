@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/stylepack/stylepack/schemas/stylepack.schema.json",
-  "title": "StylePack pack.json Schema v0.1",
-  "description": "自包含作者风格包的清单文件。配合 scripts/validate_pack.py 使用（后者还检查 schema 表达不了的语义约束：无悬空引用、引文长度等）。format_version 指 pack.json 结构版本（由本 schema 定义），与包内容版本 version 互不相干：指纹重建走 version 联动升版，pack.json 结构未变则 format_version 不动；指纹（含分层 genres/self_check）的结构契约见 fingerprint.schema.json。可选文件 registers.md（调子分区，声明式，与可自动检测的 genres 分层语义不同源）存在时，包应声明 registers: true，validate 校验示范段路由与 exemplars「调子：」行的双向一致性。",
+  "title": "StylePack pack.json Schema v0.2",
+  "description": "自包含作者风格包的清单文件。配合 scripts/validate_pack.py 使用（后者还检查 schema 表达不了的语义约束：无悬空引用、引文长度等）。format_version 指 pack.json 结构版本（由本 schema 定义），与包内容版本 version 互不相干：指纹重建走 version 联动升版，pack.json 结构未变则 format_version 不动。0.2 = 增可选能力标记 registers（调子分区 registers.md）与 thought（思想层 thought.md，v0.3）——两者均为可选包文件，缺失时全流程照常（向后兼容）；指纹（含分层 genres/self_check）的结构契约见 fingerprint.schema.json。",
   "type": "object",
   "required": [
     "format_version", "name", "display_name", "language", "genres",
@@ -26,6 +26,10 @@
     "registers": {
       "type": "boolean",
       "description": "能力标记：包内含 registers.md 调子分区（可选文件）。true 而文件缺失为校验错误；文件存在而标记缺失仅提示"
+    },
+    "thought": {
+      "type": "boolean",
+      "description": "能力标记：包内含 thought.md 思想层（可选文件，v0.3）。true 而文件缺失为校验错误；文件存在而标记缺失仅提示"
     },
     "version": {
       "type": "string",

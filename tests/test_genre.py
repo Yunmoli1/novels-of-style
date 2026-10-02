@@ -190,6 +190,87 @@ class TestGenericAuthorPipeline(unittest.TestCase):
                 errors="replace", timeout=120)
             self.assertEqual(bad.returncode, 1, bad.stdout)
 
+    def test_thought_layer_cli(self):
+        """思想层端到端（Case I）：thought.md → motif_count --write → validate →
+        fp_check --thought（advisory，退出码不受影响）。任意作者同构。"""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            corpus = root / "corpus" / "某作者"
+            all_text = []
+            for name, text in [("篇甲", _narr_text(0)), ("篇乙", _narr_text(1)),
+                               ("篇丙", _narr_text(2)),
+                               ("章甲", _essay_text(0)), ("章乙", _essay_text(1))]:
+                d = corpus / name / "chapters"
+                d.mkdir(parents=True)
+                (d / f"001-{name}.md").write_text(text, encoding="utf-8")
+                all_text.append(text)
+            pack = root / "pack"
+            pack.mkdir()
+            (pack / "pack.json").write_text("{}", encoding="utf-8")
+            (pack / "fingerprint.json").write_text("{}", encoding="utf-8")
+
+            build = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "build_delta.py"),
+                 str(corpus), "--pack", str(pack), "--layered"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120)
+            self.assertEqual(build.returncode, 0, build.stderr)
+
+            # motif 词表：一个语料高频字（必过线）+ 一个生僻字（必被剔除）
+            from collections import Counter
+            common = Counter(c for c in "".join(all_text)
+                             if "\u4e00" <= c <= "\u9fff").most_common(1)[0][0]
+            thought = (
+                "# 某作者思想档案（thought）\n\n"
+                "## 选题地平线\n写日常小事。\n\n"
+                "## 立意动作\n- 以小见大（篇甲）。\n\n"
+                "## 观察清单\n手的动作。\n\n"
+                "## 意象系统\n核心意象见词表。\n"
+                f"motif 词表：{common}、鐵\n\n"
+                "## 价值姿态\n叙述者后退半步。\n\n"
+                "## 禁区\n经历与时代所指。\n"
+            )
+            (pack / "thought.md").write_text(thought, encoding="utf-8")
+
+            mc = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "motif_count.py"),
+                 str(corpus), "--pack", str(pack), "--min-rate", "0.05", "--write"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120)
+            self.assertEqual(mc.returncode, 0, mc.stderr)
+            self.assertIn("剔除", mc.stdout)          # 鐵 不在语料 → 剔除
+            ttext = (pack / "thought.md").read_text(encoding="utf-8")
+            self.assertIn("## motif_stats", ttext)     # stats 节写回
+            self.assertIn(common, splib.parse_motif_list(ttext))
+            self.assertNotIn("鐵", splib.parse_motif_list(ttext))
+            pj = splib.load_json(pack / "pack.json")
+            self.assertTrue(any("motif_stats" in c["changes"] for c in pj["changelog"]))
+
+            # validate：thought 六节齐全 → 无 thought 相关错误（骨架缺失照常报）
+            val = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "validate_pack.py"), str(pack)],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120)
+            self.assertNotIn("缺少章节", val.stdout)
+            self.assertNotIn("motif 词表", val.stdout)
+
+            # fp_check --thought：advisory 输出出现，退出码与不带 flag 完全一致
+            genuine = corpus / "篇甲" / "chapters" / "001-篇甲.md"
+            plain = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "fp_check.py"),
+                 str(pack), str(genuine)],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120)
+            thought_run = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "fp_check.py"),
+                 str(pack), str(genuine), "--thought"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=120)
+            self.assertEqual(plain.returncode, thought_run.returncode)
+            self.assertNotIn("motif 密度对照", plain.stdout)
+            self.assertIn("motif 密度对照", thought_run.stdout)
+            self.assertIn("advisory", thought_run.stdout)
+
 
 class TestFPCheckCLI(unittest.TestCase):
     def test_cli_layered_exit_codes(self):

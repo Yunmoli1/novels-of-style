@@ -23,6 +23,8 @@
      (d) 注入启发式已由 F2 的 rglob("*.md") 覆盖 registers.md
      (e) registers.md 引文 ≤200 字
      (f) 双向一致——exemplars 调子行与 registers 示范段路由互为镜像
+  I. thought.md 思想层（可选文件，v0.3）：存在时六节齐全 + motif 词表行；
+     缺失时给 1 条提示（向后兼容）；motif_stats 节缺失 = 提示（脚本产出）
 退出码：0 = 通过；1 = 存在错误。
 """
 from __future__ import annotations
@@ -170,6 +172,9 @@ def check_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
     # H. registers.md 调子分区（R0 新落机制，见模块 docstring）
     _check_registers(pack_dir, errors, warns)
 
+    # I. thought.md 思想层（v0.3，可选文件）
+    _check_thought(pack_dir, errors, warns)
+
     return errors, warns
 
 
@@ -265,6 +270,38 @@ def _check_registers(pack_dir: Path, errors: list[str], warns: list[str]) -> Non
     pj = _pack_json()
     if pj is not None and not pj.get("registers"):
         warns.append("包内有 registers.md，建议在 pack.json 声明 \"registers\": true 能力标记")
+
+
+def _check_thought(pack_dir: Path, errors: list[str], warns: list[str]) -> None:
+    path = pack_dir / "thought.md"
+    if not path.is_file():
+        warns.append("包无 thought.md（可选思想层文件，v0.3 格式支持）")
+        pj_path = pack_dir / "pack.json"
+        if pj_path.is_file():
+            try:
+                pj = splib.load_json(pj_path)
+            except Exception:  # noqa: BLE001
+                pj = None
+            if pj is not None and pj.get("thought"):
+                errors.append("pack.json 声明 thought: true，但包内缺少 thought.md")
+        return
+
+    text = path.read_text(encoding="utf-8")
+    for section in splib.THOUGHT_SECTIONS:
+        if section not in text:
+            errors.append(f"thought.md 缺少章节：「{section}」")
+    if not splib.MOTIF_LIST_RE.search(text):
+        errors.append("thought.md 缺少「motif 词表：」行（motif_count.py 依赖）")
+    if not splib.parse_motif_stats(text):
+        warns.append("thought.md 缺少 motif_stats 节（脚本产出，运行 motif_count.py --write 补齐）")
+    pj_path = pack_dir / "pack.json"
+    if pj_path.is_file():
+        try:
+            pj = splib.load_json(pj_path)
+        except Exception:  # noqa: BLE001
+            pj = None
+        if pj is not None and not pj.get("thought"):
+            warns.append("包内有 thought.md，建议在 pack.json 声明 \"thought\": true 能力标记")
 
 
 def main() -> int:

@@ -20,16 +20,16 @@ import splib  # noqa: E402
 SECTIONS = [
     ("card.md", "精华卡"),
     ("profile.md", "完整档案"),
+    ("thought.md", "思想档案"),
     ("exemplars.md", "范例"),
+    ("registers.md", "调子分区"),
     ("lexicon.md", "词汇与句式"),
     ("limits.md", "能力边界"),
 ]
 
-# registers.md 为可选条件段（R0）：包内有则并入（插在「范例」之后），
-# 无则完全保持既有五段导出不变。v0.3 的 thought.md 将复用同一机制。
-CONDITIONAL_SECTIONS = [
-    (3, "registers.md", "调子分区"),
-]
+# 可选段：包内没有该文件时整段跳过，老包导出保持既有五段不变。
+# registers.md（R0 调子分区）与 thought.md（v0.3 思想层）均走此机制。
+OPTIONAL_SECTIONS = {"registers.md", "thought.md"}
 
 PREAMBLE = (
     "你是使用本风格包的写作助手。以下资料完整描述了一位作者的文风，"
@@ -61,19 +61,23 @@ def main() -> int:
     pj = splib.load_json(pack_dir / "pack.json")
     fp = splib.load_json(pack_dir / "fingerprint.json")
 
+    preamble = PREAMBLE
+    if (pack_dir / "thought.md").is_file():
+        preamble += ("如本文件包含「思想档案」，写作时遵循其立意动作与观察清单，"
+                     "使用「意象系统」的意象，并遵守「禁区」——宁可平实，不硬贴。")
+
     out = [f"<!-- STYLEPACK-SINGLE-FILE format_version={pj['format_version']} -->", ""]
     out.append(f"# StylePack：{pj['display_name']}")
     out.append("")
-    out.append(f"> {PREAMBLE}")
+    out.append(f"> {preamble}")
     out.append("")
 
-    sections = list(SECTIONS)
-    for pos, fname, title in CONDITIONAL_SECTIONS:
-        if (pack_dir / fname).is_file():
-            sections.insert(pos, (fname, title))
-
-    for fname, title in sections:
-        body = _strip_h1((pack_dir / fname).read_text(encoding="utf-8"))
+    for fname, title in SECTIONS:
+        p = pack_dir / fname
+        if not p.is_file():
+            if fname in OPTIONAL_SECTIONS:
+                continue
+        body = _strip_h1(p.read_text(encoding="utf-8"))
         out.append(f"## {title}")
         out.append("")
         out.append(body)

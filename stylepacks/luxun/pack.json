@@ -1,5 +1,5 @@
 {
-  "format_version": "0.1",
+  "format_version": "0.2",
   "name": "luxun",
   "display_name": "鲁迅",
   "language": "zh-CN",
@@ -10,7 +10,7 @@
     "essay"
   ],
   "registers": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "created": "2026-09-28",
   "updated": "2026-09-30",
   "corpus": {
@@ -53,6 +53,12 @@
       "version": "0.3.0",
       "date": "2026-09-30",
       "changes": "R0 调子分区：新增 registers.md（情感轴 3 分区 / 节奏轴 3 分区，61 篇标注 + 1 篇除名）+ exemplars 全部条目加调子行 + 新增示范段 11（温情回忆·从百草园到三味书屋）、12（冷峻讽刺·父亲的病）；corpus 元数据对齐 62 篇（v0.2.8 遗留缺口）；示范段路由供 style-apply / writing 按声明调子选用，验收端指纹分区属后续版本"
+    },
+    {
+      "version": "0.4.0",
+      "date": "2026-09-30",
+      "changes": "thought.md 思想层（v0.3）：六节蒸馏（选题/立意动作/观察/意象/姿态/禁区，全部条目指认篇目）+ motif 词表 12 词与 motif_stats（剔除线按大语料校正为 0.5/千字）；经用户逐节校订定稿（2026-09-30，全按草案）"
     }
-  ]
+  ],
+  "thought": true
 }
