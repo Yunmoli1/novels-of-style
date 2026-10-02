@@ -120,5 +120,11 @@
   style-calibrate 思想盲测（同题材两问，判读问题 = "哪篇更像这个作者在思考"）
 - **判定**：双包 thought.md 定稿（用户逐节校订通过）；泛用管线测试含思想步
   （TestGenericAuthorPipeline.test_thought_layer_cli）；zhuziqing 各节置信度
-  逐节标注（语料仅 4 篇，回避 / 禁区为**弱禁用**）。**思想盲测首轮待跑**
-  ——按 style-calibrate 协议，同题材两问 × 2 组
+  逐节标注（语料仅 4 篇，回避 / 禁区为**弱禁用**）
+- **思想盲测首轮（2026-09-30，已跑）**：判官 = 4 个独立子代理（不读风格包，
+  防循环论证），写手 = 8 个独立子代理（带包臂全六件装载 + fp_check 自检，
+  无包臂纯先验）；2 题 × 自由/约束立意 4 回合——**带包臂 3/4**（全部高置信度）。
+  R3 失利：带包段给人物立了抒情碑收尾，恰违反 thought.md 禁区"结尾不给
+  安慰"——思想纪律失守只能被盲测抓住（无机械门，按设计），教训落账
+  calibration.json；实跑工作流应启用 style-critique 贴标签检测。明细见
+  evals/calibration.json `thought_blind_v030`
