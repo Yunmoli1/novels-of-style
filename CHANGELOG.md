@@ -2,6 +2,29 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.3.1] - 2026-09-30
+
+### Added
+- **registers_dryrun.py**：调子分区统计真实性检验 CLI——层间归因率 + 置换检验
+  p 值 + 候选分法（k=现状 / k-1 合并）对照表；**全局基准纪律写死在代码里**
+- splib 归因/置换机器：`parse_registers_md`（含标定行）、`match_labels_to_files`、
+  `build_register_layers`、`build_metric_matrix`（12 维句法度量向量）、
+  `attribution_detail / permutation_test`（固定种子可复现；预计算矩阵让
+  1000 次置换秒级可跑）
+- `tests/test_stratum.py`：阳性对照（合成双维可分语料必须显著）、阴性对照
+  （随机标签必须不显著）、种子确定性、标定行解析、dry-run CLI 冒烟
+
+### Changed
+- **R1 检查点 1 裁决（负结果）**：层间归因 + 置换检验（预注册判据，全局基准）
+  全轴不显著（情感轴 p=0.336 / 节奏轴 p=0.278）——六分区全部标"仅路由"，
+  指纹分区不落地（build_delta --registers / fp_check --stratum 按计划不实现）；
+  registers.md r2 落标定状态，示范段路由（R0）不受影响
+- 仪器可信度：阳性对照（文体标签，度量空间）归因 0.871 / p=0.0；阴性对照
+  （随机标签）p=0.51
+- 方法论产出：**基准纪律**——逐轴自建 z-score 基准曾给出 p=0.01 的假显著，
+  全局基准下消失；显著性检验的基准选择必须先于看数固定
+- evals 新增 Case J（R1 负结果全记录）
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

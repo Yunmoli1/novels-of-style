@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import sys
 from collections import Counter
@@ -647,7 +648,239 @@ def layered_check(text: str, fingerprint: dict, genre: str | None = None,
     }
 
 
-# ---------------------------------------------------------------- IO
+# ---------------------------------------------------------------- 调子分区（R1，声明式）
+# 语义分工：genres = 可自动检测的文体（检测键）；registers = 声明式调子（声明键）。
+# 分组/档案/留一机制与文体层完全同构，只是分组键换成 registers.md 的标签。
+
+def parse_registers_md(text: str) -> dict:
+    """解析 registers.md → {"labels": {篇名: 主分区}, "axes": {分区名: 轴},
+    "calibration": {分区名: "已标定"|"仅路由"}}。
+
+    篇目总表行格式：| 篇名 | 主分区 | 次分区 | 一句依据 |；除名篇目不在表中，
+    天然排除在分区统计之外（仍留在语料与文体层全集基线里）。
+    各分区定义块内可用机器行声明标定状态：`标定：已标定（依据…）` /
+    `标定：仅路由（依据…）`——R1 检查点的裁决落点，build_delta --registers
+    以此为准逐层录取。
+    """
+    axes: dict[str, str] = {}
+    calibration: dict[str, str] = {}
+    m = re.search(r"^##\s+分区定义\s*$", text, flags=re.M)
+    if m:
+        defs = re.split(r"^##\s+", text[m.end():], flags=re.M)[0]
+        axis = None
+        for line in defs.splitlines():
+            h = line.strip()
+            if h.startswith("### "):
+                axis = h[4:].split("（")[0].strip()
+            elif h.startswith("#### ") and axis:
+                axes[h[5:].strip()] = axis
+        # 标定行归属其上方最近的 #### 分区
+        current = None
+        for line in defs.splitlines():
+            h = line.strip()
+            if h.startswith("#### "):
+                current = h[5:].strip()
+            elif h.startswith("### "):
+                current = None
+            else:
+                cm = re.match(r"^标定[:：]\s*(已标定|仅路由)", h)
+                if cm and current:
+                    calibration[current] = cm.group(1)
+    labels: dict[str, str] = {}
+    m = re.search(r"^##\s+篇目总表.*$", text, flags=re.M)
+    if m:
+        table = re.split(r"^##\s+", text[m.end():], flags=re.M)[0]
+        for row in re.findall(r"^\|([^|]+)\|([^|]+)\|", table, flags=re.M):
+            name, main = row[0].strip(), row[1].strip()
+            if name and main and name != "篇名" and not set(name) <= set("-— "):
+                labels[name] = main
+    return {"labels": labels, "axes": axes, "calibration": calibration}
+
+
+def match_labels_to_files(files: list[Path], labels: dict[str, str],
+                          read: bool = True) -> tuple[list[tuple[str, str]], list[str]]:
+    """把语料文件映射到 registers.md 篇名：文件名 stem 去掉首个 '-' 前缀后
+    精确匹配篇名（nahai-孔乙己.txt → 孔乙己）。返回 ([(篇名, 文本)], 未匹配文件)。
+    """
+    matched: list[tuple[str, str]] = []
+    unmatched: list[str] = []
+    for f in files:
+        stem = f.stem
+        name = stem.split("-", 1)[1] if "-" in stem else stem
+        if name in labels:
+            matched.append((name, f.read_text(encoding="utf-8", errors="replace")
+                            if read else ""))
+        else:
+            unmatched.append(f.name)
+    return matched, unmatched
+
+
+def build_register_layers(named_texts: list[tuple[str, str]], labels: dict[str, str],
+                          top_n: int = 150) -> dict:
+    """按声明式调子标签分层构建层档案（阈值树 + Delta 档案），结构与 genres 同构。"""
+    strata: dict[str, list[tuple[str, str]]] = {}
+    for name, text in named_texts:
+        strata.setdefault(labels[name], []).append((name, text))
+    regs: dict[str, dict] = {}
+    for g, items in strata.items():
+        pooled = "\n\n".join(t for _, t in items)
+        m = compute_metrics(pooled)
+        regs[g] = {
+            "samples": [n for n, _ in items],
+            "chars_total": m["chars_total"],
+            "metrics": derive_thresholds([t for _, t in items]),
+            "delta_profile": (build_delta_profile([t for _, t in items], top_n=top_n)
+                              if len(items) >= 3 else None),
+        }
+    return regs
+
+
+def _build_rate_matrix(named_texts: list[tuple[str, str]],
+                       top_n: int = 150) -> tuple[list[str], list[dict[str, float]]]:
+    """全局 top-N 字符集 + 各篇字频向量（归因/置换共用的预计算矩阵）。"""
+    agg: Counter = Counter()
+    for _, t in named_texts:
+        agg.update(c for c in t if CJK_RE.match(c))
+    chars = [c for c, _ in agg.most_common(top_n)]
+    rows = [char_rates(t, chars) for _, t in named_texts]
+    return chars, rows
+
+
+# 度量空间向量：节奏轴的主张（句长 / 对话密度 / 标点）落在这里，字频 Delta 测不到
+METRIC_KEYS: list[tuple[str, ...]] = [
+    ("sentence_length", "p25"), ("sentence_length", "p50"), ("sentence_length", "p75"),
+    ("paragraph", "p50_len"), ("paragraph", "dialogue_para_ratio"),
+    ("quote_char_ratio",),
+    ("punctuation_per_1k", "？"), ("punctuation_per_1k", "！"),
+    ("punctuation_per_1k", "…"), ("punctuation_per_1k", "—"), ("punctuation_per_1k", "；"),
+    ("reduplication_per_1k",),
+]
+
+
+def build_metric_matrix(named_texts: list[tuple[str, str]],
+                        top_n: int = 150) -> tuple[list[str], list[dict[str, float]]]:
+    """各篇度量向量（全局 z-score）：与字频矩阵同构，供同一套归因/置换机器使用。
+    返回 (维度名列表, 各篇向量)——top_n 参数仅为与字频矩阵签名一致，忽略。"""
+    raw = [compute_metrics(t) for _, t in named_texts]
+    keys = ["+".join(k) for k in METRIC_KEYS]
+    cols: list[list[float]] = []
+    for k in METRIC_KEYS:
+        vals = []
+        for m in raw:
+            node = m
+            for step in k:
+                node = node.get(step, {}) if isinstance(node, dict) else {}
+            v = node if isinstance(node, (int, float)) else 0.0
+            vals.append(float(v))
+        n = len(named_texts)
+        mean = sum(vals) / n if n else 0.0
+        var = sum((v - mean) ** 2 for v in vals) / n if n else 0.0
+        std = (var ** 0.5) or 1e-6
+        cols.append([(v - mean) / std for v in vals])
+    rows = [{key: cols[j][i] for j, key in enumerate(keys)} for i in range(n)]
+    return keys, rows
+
+
+def attribution_detail(named_texts: list[tuple[str, str]], labels: dict[str, str],
+                       top_n: int = 150,
+                       matrix: tuple[list[str], list[dict[str, float]]] | None = None
+                       ) -> dict:
+    """层间归因（留一）明细：每篇对自身层其余篇目建档案，与兄弟层档案比 Delta
+    距离，最近层为自身层即判对。字符集取全体语料全局 top-N（同一基准，
+    归因比较才公平——与存档 profile 的子集自带 top-N 刻意不同，见 Case I）。
+    层内其余 <2 篇的篇目跳过。返回 {"rate", "judged", "per_group"}。"""
+    chars, rows = matrix if matrix is not None else _build_rate_matrix(named_texts, top_n)
+
+    strata: dict[str, list[int]] = {}
+    for i, (name, _) in enumerate(named_texts):
+        strata.setdefault(labels[name], []).append(i)
+
+    group_profiles = {g: _profile_from_rows(rows, chars, idxs)
+                      for g, idxs in strata.items()}
+    per_group = {g: {"judged": 0, "correct": 0} for g in strata}
+    for g, idxs in strata.items():
+        for i in idxs:
+            others = [j for j in idxs if j != i]
+            if len(others) < 2 or len(strata) < 2:
+                continue
+            own = _profile_from_rows(rows, chars, others)
+            d_own = _dist_from_rates(rows[i], own)
+            d_others = min(_dist_from_rates(rows[i], p)
+                           for gg, p in group_profiles.items() if gg != g)
+            per_group[g]["judged"] += 1
+            if d_own < d_others:
+                per_group[g]["correct"] += 1
+    judged = sum(v["judged"] for v in per_group.values())
+    correct = sum(v["correct"] for v in per_group.values())
+    return {"rate": (round(correct / judged, 4) if judged else 0.0),
+            "judged": judged, "per_group": per_group}
+
+
+def attribution_rate(named_texts: list[tuple[str, str]], labels: dict[str, str],
+                     top_n: int = 150,
+                     matrix: tuple[list[str], list[dict[str, float]]] | None = None
+                     ) -> tuple[float, int]:
+    d = attribution_detail(named_texts, labels, top_n=top_n, matrix=matrix)
+    return d["rate"], d["judged"]
+
+
+def _profile_from_rows(rows: list[dict[str, float]], chars: list[str],
+                       idxs: list[int]) -> dict:
+    """对预计算的字频矩阵行子集建档案——数学与 build_delta_profile 完全一致
+    （均值 / 总体 std / 4 位舍入 / 1e-4 防除零），只是省去重复全文计数。"""
+    prof: dict[str, list[float]] = {}
+    n = len(idxs)
+    for c in chars:
+        vals = [rows[i][c] for i in idxs]
+        mean = sum(vals) / n
+        var = sum((v - mean) ** 2 for v in vals) / n if n > 1 else 0.0
+        std = round(var ** 0.5, 4)
+        prof[c] = [round(mean, 4), std if std > 0 else 1e-4]
+    return {"chars": prof, "n_samples": n, "top_n": len(chars)}
+
+
+def _dist_from_rates(rate_row: dict[str, float], profile: dict) -> float:
+    diffs = [abs((rate_row[c] - m) / s) for c, (m, s) in profile["chars"].items()]
+    return round(sum(diffs) / len(diffs), 3) if diffs else 999.0
+
+
+def permutation_test(named_texts: list[tuple[str, str]], labels: dict[str, str],
+                     n_perm: int = 1000, seed: int = 20260930, top_n: int = 150,
+                     matrix: tuple[list[str], list[dict[str, float]]] | None = None
+                     ) -> dict:
+    """置换检验：把标签随机重排（各层规模不变）N 次 → 归因率零假设分布。
+    p = 零假设中 ≥ 观察值的比例（单侧）。返回观测率、p 值与零假设摘要；
+    固定种子保证换机重跑可复现（r3 审查 #1）。"""
+    det = attribution_detail(named_texts, labels, top_n=top_n, matrix=matrix)
+    observed, judged = det["rate"], det["judged"]
+    rng = random.Random(seed)
+    names = [n for n, _ in named_texts]
+    # 层规模（按首次出现顺序，保证与 attribution_rate 的分组键一致）
+    seen: dict[str, int] = {}
+    for n in names:
+        seen[labels[n]] = seen.get(labels[n], 0) + 1
+    sizes = list(seen.items())
+    all_names = names[:]
+    null: list[float] = []
+    for _ in range(n_perm):
+        rng.shuffle(all_names)
+        perm_labels: dict[str, str] = {}
+        idx = 0
+        for g, size in sizes:
+            for _ in range(size):
+                perm_labels[all_names[idx]] = g
+                idx += 1
+        null.append(attribution_detail(named_texts, perm_labels, top_n=top_n,
+                                       matrix=matrix)["rate"])
+    p = round(sum(1 for r in null if r >= observed) / len(null), 4) if null else 1.0
+    return {"observed": observed, "judged": judged, "p": p,
+            "null_mean": round(sum(null) / len(null), 4) if null else None,
+            "null_max": max(null) if null else None,
+            "n_perm": n_perm, "seed": seed,
+            "per_group": det["per_group"]}
+
+
+
 
 
 def force_utf8_stdio() -> None:
