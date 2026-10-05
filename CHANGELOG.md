@@ -2,6 +2,31 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.4.0] - 2026-10-05
+
+### Added
+- **zhuziqing 语料 4→10 篇（Case G 收官）**：桨声灯影里的秦淮河 / 绿 /
+  白种人——上帝的骄子 / 儿女 / 冬天 / 南京，全部来自中文维基文库（当日
+  可达性恢复；MediaWiki API wikitext + opencc t2s 本地简体化 + 繁体标记字
+  断言 + 语境核查），逐篇 provenance
+- downloads/_raw/fetch_zhuziqing_wikisource.py：抓取/清洗/转换管线（可复跑）
+- thought.md r2 重蒸馏（zhuziqing）：10 篇精读逐条裁决 4 篇时代的结论——
+  **2 条弱禁用被推翻**（社会冲突/多人对话强冲突）、2 条降条件项、1 条转正
+  硬规则（虚构人物禁写）、新增 3 条；motif 词表 12 词重算（旧表 5 词系
+  4 篇选样假象，跌破剔除线删除）
+- **思想盲测续跑**：4 回合（luxun 2 + zhuziqing 2）——带包 3/4，累计 6/8；
+  zhuziqing r2 两轮全胜，判官获胜理由即 r2 判据（thought_blind_v040）
+
+### Changed
+- **跨包归因仪器修正（重要）**：复测发现旧口径（各自包 top-150 字符集
+  Delta）随基准选择**翻转方向**（评测集 luxun 0/5、大语料又 62/62，p 全不
+  显著）——v0.2.8 的 7/9 与 zhuziqing n=4 的 2/4 均属仪器伪影，如实撤销；
+  改用**度量空间 + 全局基准**（Case J 同源机器）：**13/15（0.867），
+  p=0.004，zhuziqing 侧 9/10**——"补齐后回 ≥0.9"的预测在正确仪器上兑现。
+  test_cross_validation 重写（test_delta.py），evals Case G 收官补记
+- zhuziqing essay 层留一线 2.112 → 1.486（n=10）；pack.json 0.4.1；
+  82→84 项测试全绿
+
 ## [0.3.1] - 2026-09-30
 
 ### Added

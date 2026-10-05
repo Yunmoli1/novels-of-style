@@ -38,34 +38,38 @@ class TestDeltaRealPacks(unittest.TestCase):
         layer = fp.get("genres", {}).get(g)
         return (layer or {}).get("delta_profile") or fp["delta_profile"]
 
-    def test_cross_validation_layered(self):
-        """跨包归因（v0.2.8 起用分层口径）：每篇真迹按文体选层，比较自包与对方包
-        同层档案的距离。已知限制（如实测得）：zhuziqing 语料仅 4 篇（扩充待源），
-        其 essay 层对自家作品的归因余量极薄（两篇差距 < 0.2），当前诚实下限 7/9；
-        luxun 侧（n=36/26）5/5 全对。zhuziqing 语料扩充后应回到 ≥ 0.9 并收紧阈值。"""
-        lux_fp = splib.load_json(ROOT / "stylepacks" / "luxun" / "fingerprint.json")
-        zhu_fp = splib.load_json(ROOT / "stylepacks" / "zhuziqing" / "fingerprint.json")
-        self.assertIn("genres", lux_fp)
-        correct = total = 0
-        misses = []
-        for author, own in (("luxun", lux_fp), ("zhuziqing", zhu_fp)):
-            other = zhu_fp if author == "luxun" else lux_fp
+    def test_cross_validation_metric_global_basis(self):
+        """跨包作者归因（v0.4.0 仪器修正：度量空间 + 全局字符基准）。
+
+        仪器修正的依据（v0.3.1→v0.4.0 执行记录）：
+        - 旧仪器（各自包的 delta_profile，即各自 top-150 字符集）随基准选择
+          **翻转方向**：15 篇评测集上 luxun 0/5、大语料上又 62/62，p 全不显著——
+          v0.2.8 的 7/9 属仪器伪影；zhuziqing n=4 时代的 2/4 亦为档案自含过拟合
+        - 度量空间（12 维句法度量）+ 全局字符基准：**13/15（0.867），p=0.004
+          （置换 n=500，seed 20260930）**，两侧 ≥0.8——与 Case J 的仪器纪律同源
+        """
+        named, labels = [], {}
+        for author in ("luxun", "zhuziqing"):
             for f in sorted((CORPUS_DIR / author).rglob("*.md")):
                 text, _ = splib.read_text(f)
                 if splib._clen(text) < 200:
                     continue
-                total += 1
-                g = splib.detect_genre(text)["genre"]
-                d_own = splib.delta_distance(text, self._layer_profile(own, g))
-                d_other = splib.delta_distance(text, self._layer_profile(other, g))
-                if d_own < d_other:
-                    correct += 1
-                else:
-                    misses.append(f"{author}/{f.parent.name}")
-        self.assertGreater(total, 0)
-        # 当前诚实下限（zhuziqing 语料未扩充）：7/9；扩充后收紧至 ≥ 0.9
-        self.assertGreaterEqual(correct / total, 0.7,
-                                f"跨包归因跌破下限，误归：{misses}")
+                key = f"{author}/{f.parent.parent.name}"
+                named.append((key, text))
+                labels[key] = author
+        self.assertGreater(len(named), 5)
+        matrix = splib.build_metric_matrix(named)
+        r = splib.permutation_test(named, labels, n_perm=500,
+                                   seed=20260930, matrix=matrix)
+        self.assertGreaterEqual(r["observed"], 0.8,
+                                f"作者归因跌破 0.8：observed={r['observed']}")
+        self.assertLessEqual(r["p"], 0.05,
+                             f"作者归因不再显著高于置换零假设：p={r['p']}")
+        for author in ("luxun", "zhuziqing"):
+            pg = r["per_group"][author]
+            rate = pg["correct"] / pg["judged"]
+            self.assertGreaterEqual(rate, 0.8,
+                                    f"{author} 侧归因跌破 0.8：{pg}")
 
 
 if __name__ == "__main__":
