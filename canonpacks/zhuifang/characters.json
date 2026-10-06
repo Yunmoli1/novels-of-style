@@ -1,24 +1,24 @@
 {
   "work": "少女前线2：追放",
   "roster": [
-    {"name": "指挥官", "tier": "core", "role": "玩家主角；与格里芬爵士理念决裂后自我流放的前格里芬指挥官，污染区赏金猎人，艾莫号所有者", "redline": "不与格里芬现役体系纠缠（旧身份仅作过去语境）；决策带清单与损耗账的底色"},
-    {"name": "闪电", "tier": "core", "role": "OTs-14，闪电小队队长", "redline": null},
-    {"name": "纳美西丝", "tier": "core", "role": "闪电小队成员", "redline": null},
-    {"name": "克罗丽科", "tier": "core", "role": "闪电小队成员", "redline": null},
-    {"name": "寇尔芙", "tier": "core", "role": "闪电小队医疗人形", "redline": "待核：性格要点需原作台词样本校验后方可定稿；建档前项目自拟性格须标注『作者推定』"},
-    {"name": "维普蕾", "tier": "core", "role": "闪电小队成员", "redline": null},
+    {"name": "指挥官", "tier": "core", "role": "玩家主角；与格里芬爵士理念决裂后自我流放的前格里芬指挥官，污染区赏金猎人，艾莫号所有者", "redline": "不与格里芬现役体系纠缠（旧身份仅作过去语境）；决策带清单与损耗账的底色【强】"},
+    {"name": "闪电", "tier": "core", "role": "OTs-14，闪电小队队长，一代延续至今的老牌人形", "redline": "允许以简短指令句下达战术命令、独立决断战场事项；禁止欺骗或背叛指挥官，禁止隐瞒自身曾被改造与伪造记忆的真相【强】"},
+    {"name": "纳美西丝", "tier": "core", "role": "白教流出的实验人形，狙击手，靠占卜扬名", "redline": "允许占卜与谶语式谜话表达判断；谜面可以绕，谜面之下的结论不得为假；禁止全程直白陈述情报【强】"},
+    {"name": "克罗丽科", "tier": "core", "role": "闪电小队近战专家（尖兵），原被生擒入队", "redline": "允许直言顶撞、语气冲但执行可靠，近战必须主动担当；禁止任何人观看或读取其心智与内心数据，触及即拒绝乃至以自我熔毁威胁回应【强】"},
+    {"name": "寇尔芙", "tier": "core", "role": "闪电小队医疗人形，艾莫号医疗担当", "redline": "允许『人家』自称与夹子音撒娇腔；同伴遇险必须施救优先，禁止弃伴自保；瓦良格帮灭队之仇禁止淡忘或轻率和解，只能延后、不可抹除；表面热情与偶尔冷淡的双面感并存【强】。迁移约定：灰区回声项目第1—11章维持既有『礼貌先报数据』写法不改稿，第12章起渐进引入原作声线（详见项目 bible/characters.md 迁移说明）【约定·强】"},
+    {"name": "维普蕾", "tier": "core", "role": "被罗联抛弃的偶像人形，主线第六章入队，气氛担当", "redline": "允许把作战与言行当演出、对观众说话；禁止流露对罗联的怨恨或持续负面情绪【强】"},
     {"name": "沈美玲", "tier": "minor", "role": "艾莫号首席机械师（人类）", "redline": null},
     {"name": "格琳娜", "tier": "minor", "role": "艾莫号车组（人类）", "redline": null},
-    {"name": "海伦娜", "tier": "minor", "role": "主线关键人物（2074-04-15 袭击事件的『货物』）", "redline": null},
+    {"name": "海伦娜", "tier": "minor", "role": "主线关键人物（2074-04-15 袭击事件的『货物』），与艾莫号来历无关【已核】", "redline": null},
     {"name": "梅兰妮", "tier": "minor", "role": "艾莫号车组", "redline": null},
     {"name": "德尔", "tier": "minor", "role": "艾莫号车组", "redline": null},
     {"name": "希尔", "tier": "minor", "role": "艾莫号车组", "redline": null},
-    {"name": "佩里缇亚", "tier": "minor", "role": "综合梯队 / 国安局（非开局班底，出场前补档案）", "redline": null},
-    {"name": "科谢尼娅", "tier": "minor", "role": "其他班底（出场前补档案）", "redline": null},
-    {"name": "桑朵莱希", "tier": "minor", "role": "方糖咖啡馆（出场前补档案）", "redline": null},
-    {"name": "塞布丽娜", "tier": "minor", "role": "其他班底（出场前补档案）", "redline": null},
-    {"name": "琼玖", "tier": "minor", "role": "霜降小队（出场前补档案）", "redline": null},
-    {"name": "黛烟", "tier": "minor", "role": "季风乐队【存在性待核】", "redline": null}
+    {"name": "佩里缇亚", "tier": "minor", "role": "综合梯队 / 国安局；克罗丽科戴兔耳即为了让其认出自己（两人有旧）", "redline": null},
+    {"name": "琼玖", "tier": "minor", "role": "霜降小队", "redline": null},
+    {"name": "黛烟", "tier": "minor", "role": "季风乐队人形（QBZ-95 烙印），国服2023年12月实装【已核·强】", "redline": null},
+    {"name": "桑朵莱希", "tier": "minor", "role": "方糖咖啡馆", "redline": null},
+    {"name": "塞布丽娜", "tier": "minor", "role": "其他班底", "redline": null},
+    {"name": "科谢尼娅", "tier": "minor", "role": "其他班底", "redline": null}
   ],
-  "oc_interface_rule": "OC 必须在项目 bible/characters.md 登记接口声明三件套：她是谁、为何原作名单中没有她、与哪些原作实体相连。未登记接口的 OC 视为一致性检查 P1 项。"
+  "oc_interface_rule": "OC 必须在项目 bible/characters.md 登记接口声明三件套：她是谁、为何原作名单里没有她、与哪些原作实体相连。未登记接口的 OC 视为一致性检查 P1 项。"
 }
