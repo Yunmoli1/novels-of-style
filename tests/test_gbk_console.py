@@ -131,6 +131,10 @@ class TestGBKSmokeAllCLI(unittest.TestCase):
                 # 真实工具路径（v0.2.7：替换此前的 --help 冒烟）
                 ("timeline_check", [S + r"\timeline_check.py", "--timeline",
                                     str(t / "timeline.json")], 0, "时间线一致"),
+                # borrow_check（v0.4.2）：真包真引文，干净草稿走 GBK 管道
+                ("borrow_check", [S + r"\borrow_check.py", str(t / "s.txt"),
+                                  "--pack", str(ROOT / "stylepacks" / "zhuziqing")],
+                 0, "未发现"),
             ]
             for name, args, rc, word in cases:
                 with self.subTest(cli=name):

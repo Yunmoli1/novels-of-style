@@ -8,7 +8,7 @@
     "literary",
     "essay"
   ],
-  "version": "0.4.2",
+  "version": "0.4.3",
   "created": "2026-09-28",
   "updated": "2026-10-05",
   "corpus": {
@@ -78,6 +78,11 @@
       "version": "0.4.2",
       "date": "2026-10-05",
       "changes": "motif_stats 更新（motif_count.py）"
+    },
+    {
+      "version": "0.4.3",
+      "date": "2026-10-06",
+      "changes": "profile.md r2 重蒸馏（10 篇逐条重裁决）：对话改按关系分层（推翻 4 篇时代「对话极少」）、议论改三通道条件项（对齐 thought r3）、结构补纪游列叙/忆人三叠/自省忏悔三骨架、情感谱扩（忏悔自贬/幻灭怅惘/实事托住直抒/愤怒峰值锚实物）、生成指导表补 5 行；exemplars 8→12 条（童语成串/对答窘态/幻灭收束/直抒收束）；lexicon/limits/card 同步（limits 语料描述改 10 篇四路）"
     }
   ],
   "thought": true
