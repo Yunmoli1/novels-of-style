@@ -1,0 +1,21 @@
+{
+  "format_version": "1.0",
+  "kind": "canon",
+  "name": "zhuifang",
+  "display_name": "少女前线2：追放 canon 包",
+  "language": "zh",
+  "version": "0.1.0",
+  "created": "2026-10-06",
+  "updated": "2026-10-06",
+  "cast_policy": {
+    "min_active_canon_chars_per_volume": 3,
+    "require_interface_for_oc": true,
+    "ooc_ref": "characters.json",
+    "note": "项目可在钉扎时放宽人数下限（cast_policy 可覆盖）；ban 词与 OOC 红线不可放宽"
+  },
+  "provenance": [],
+  "license_note": "非官方同人创作辅助档案，仅收设定摘要与自写概括，不收原文段落；《少女前线》系列版权归原权利方（散爆网络 / MICA Team）所有。",
+  "changelog": [
+    "0.1.0 (2026-10-06): 首版——术语三级表、闪电小队 roster、时代锚点、污染分级、题材惯例；艾莫号前身两源冲突未裁决，列待核"
+  ]
+}

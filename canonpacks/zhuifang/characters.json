@@ -1,0 +1,24 @@
+{
+  "work": "少女前线2：追放",
+  "roster": [
+    {"name": "指挥官", "tier": "core", "role": "玩家主角；与格里芬爵士理念决裂后自我流放的前格里芬指挥官，污染区赏金猎人，艾莫号所有者", "redline": "不与格里芬现役体系纠缠（旧身份仅作过去语境）；决策带清单与损耗账的底色"},
+    {"name": "闪电", "tier": "core", "role": "OTs-14，闪电小队队长", "redline": null},
+    {"name": "纳美西丝", "tier": "core", "role": "闪电小队成员", "redline": null},
+    {"name": "克罗丽科", "tier": "core", "role": "闪电小队成员", "redline": null},
+    {"name": "寇尔芙", "tier": "core", "role": "闪电小队医疗人形", "redline": "待核：性格要点需原作台词样本校验后方可定稿；建档前项目自拟性格须标注『作者推定』"},
+    {"name": "维普蕾", "tier": "core", "role": "闪电小队成员", "redline": null},
+    {"name": "沈美玲", "tier": "minor", "role": "艾莫号首席机械师（人类）", "redline": null},
+    {"name": "格琳娜", "tier": "minor", "role": "艾莫号车组（人类）", "redline": null},
+    {"name": "海伦娜", "tier": "minor", "role": "主线关键人物（2074-04-15 袭击事件的『货物』）", "redline": null},
+    {"name": "梅兰妮", "tier": "minor", "role": "艾莫号车组", "redline": null},
+    {"name": "德尔", "tier": "minor", "role": "艾莫号车组", "redline": null},
+    {"name": "希尔", "tier": "minor", "role": "艾莫号车组", "redline": null},
+    {"name": "佩里缇亚", "tier": "minor", "role": "综合梯队 / 国安局（非开局班底，出场前补档案）", "redline": null},
+    {"name": "科谢尼娅", "tier": "minor", "role": "其他班底（出场前补档案）", "redline": null},
+    {"name": "桑朵莱希", "tier": "minor", "role": "方糖咖啡馆（出场前补档案）", "redline": null},
+    {"name": "塞布丽娜", "tier": "minor", "role": "其他班底（出场前补档案）", "redline": null},
+    {"name": "琼玖", "tier": "minor", "role": "霜降小队（出场前补档案）", "redline": null},
+    {"name": "黛烟", "tier": "minor", "role": "季风乐队【存在性待核】", "redline": null}
+  ],
+  "oc_interface_rule": "OC 必须在项目 bible/characters.md 登记接口声明三件套：她是谁、为何原作名单中没有她、与哪些原作实体相连。未登记接口的 OC 视为一致性检查 P1 项。"
+}

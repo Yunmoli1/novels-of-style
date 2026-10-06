@@ -2,6 +2,42 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.5.0] - 2026-10-06
+
+### Added
+- **canon 层（二创约束引导，计划书 v0.5）**：新增 `canonpacks/` 包类型，与风格包
+  对称——card / facts / conventions / terms.json（must/allow/ban 三级术语表，
+  错译进 wrong 变体）/ characters.json（roster+tier+OOC 红线+OC 接口规则）/
+  sources.md（URL+抓取日期审计）。首包 `canonpacks/zhuifang`《少女前线2：追放》
+  （闪电小队 roster、2074 时代锚点、黑→红→黄→净化区→绿→白污染分级）
+- **canon_terms_check.py**：must 覆盖（volume/chapter 两档阈值）+ ban/错写
+  0 容忍 + 千字浓度 advisory（防硬塞指标）；7 项行为测试
+- **validate/export/pin 的 canon 分支**：pack.json.kind=="canon" 分派；canon 校验
+  （必备文件、cast_policy、ban 必须给理由、core 角色红线缺失警告、sources 审计、
+  引文 >100 字违反摘要纪律、注入启发式复用）；canon 单文件导出
+  （CANONPACK-SINGLE-FILE）；pin 同步写 canon-terms.json 快照（_pinned_from 记版本）
+- **技能（双副本同步）**：style-setup 第 3.5 步"原作锚定"（二创分支：联网双源
+  核对 → canon 档案逐节校订 → validate → pin → outline 双轨声明"事件原创、
+  设定恪守"）；style-apply 上下文协议第 6 条（canon 层必载）、拍子表"原作锚点"行、
+  验收加 canon 检查、自检表加"canon 检查"项；consistency-check 第一层
+  canon_terms_check、第二层"原作保真"（OOC 以 canon 人物卡优先、facts 红线 P1、
+  OC 接口核查）；stylepack list/pin 支持 canon 包
+- schemas/canonpack.schema.json
+
+### Fixed
+- 灰区回声 P0（案例修复，reviews/p0-验收报告.md）：埃尔莫→艾莫号错译 47 处清零、
+  "沙暴"→"坍塌风暴"46 处规范；第 8—10 章连续性接缝修复（旧人形下落三版统一、
+  存储盒"只够播放一次"与第 9 章长录音矛盾、文件【她们】穿越引用、第 10 章开头
+  重演返程段删除）
+
+### Data
+- canon 盲测 canon_blind_v050（项目 style/calibration.json）：n=4，canon 臂
+  3 胜 1 负（负局中置信，胜局均高置信）。发现：无包臂凭模型先验也能产出
+  琼玖 / 佩里缇亚 / ELID——canon 层的边际优势在**术语体系化与委托-结算经济
+  脚手架**，与计划书 v0.5 论点一致；n=4 只记趋势
+
+测试：95 → 100（canon_check 7 项 + validate/export canon 5 项）
+
 ## [0.4.2] - 2026-10-06
 
 ### Added

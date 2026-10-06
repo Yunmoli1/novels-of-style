@@ -28,14 +28,19 @@ python scripts/validate_pack.py stylepacks/<包名>
 
 ## list —— 列出可用包
 
-遍历 `stylepacks/`，对每个子目录读 `pack.json` 汇报：
-包名 | 展示名 | 语言 | 类型 | 版本 | 语料置信度。
+遍历 `stylepacks/` 与 `canonpacks/`，对每个子目录读 `pack.json` 汇报：
+包名 | 展示名 | 语言 | 类型（风格 / **canon**）| 版本 | 语料置信度。
+canon 包（`kind: "canon"`，v0.5）是二创原作档案：术语三级表 + 人物红线 +
+事实锚点，供 canon_terms_check 与写作装载。
 
-## pin —— 把包钉扎进项目
+## pin —— 把包钉扎进项目（含 canon 包）
 
 1. 确认目标项目（含 `style/` 目录；没有则先走 style-setup 建工作区）
 2. 读包的 `pack.json` 取 `version`
 3. 运行 export 输出到 `<项目>/style/pinned-pack.md`，文件头注明：
    `<!-- pinned: <包名> v<版本> at <日期> -->`
-4. 提醒用户：**钉扎后项目内验收一律以该版本为准**；升版本需重新 pin，
+4. **canon 包**：export 输出到 `<项目>/canon/pinned-canon.md`（同样注明版本），
+   并把包内 `terms.json` 快照写入 `<项目>/canon/canon-terms.json`
+   （加 `_pinned_from` 字段记版本）；之后 canon_terms_check 一律以该快照为准
+5. 提醒用户：**钉扎后项目内验收一律以该版本为准**；升版本需重新 pin，
    已写章节的历史验收不受影响（版本钉扎语义）

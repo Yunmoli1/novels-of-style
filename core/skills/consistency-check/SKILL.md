@@ -18,6 +18,10 @@ python scripts/names_check.py --names <项目>/bible/names.json <项目>/manuscr
 
 # 时间线（需要 bible/timeline.json）
 python scripts/timeline_check.py --timeline <项目>/bible/timeline.json --manuscript <项目>/manuscript
+
+# canon 术语保真（二创项目，canon/canon-terms.json 存在时；v0.5）
+python scripts/canon_terms_check.py --terms <项目>/canon/canon-terms.json \
+  --per-chapter <项目>/manuscript
 ```
 
 `names.json` / `timeline.json` 缺失时：先提议从 `characters.md` / 现有章节中
@@ -29,11 +33,17 @@ python scripts/timeline_check.py --timeline <项目>/bible/timeline.json --manus
 对影响面实体（本章出场的 + pending 变更涉及的），只装载这些实体的 bible 条目
 与相关章节片段，逐项检查并给证据（章节 + 段落引用 ≤ 40 字）：
 
-1. **OOC**：人物言行是否越出 `characters.md` 的行为边界与声线
+1. **OOC**：人物言行是否越出 `characters.md` 的行为边界与声线；
+   二创项目的原作人物以 **canon 人物卡（characters.json 的 redline）优先**——
+   检查"原作人物像不像原作的人"，项目自拟性格与 canon 冲突时按 canon 报 P1
 2. **认知边界**：人物是否说出了/使用了不该知道的信息（谁知道什么，对照 world.md）
 3. **伏笔账本**：`foreshadowing.md` 中"已埋未收"条目在本批章节的回收情况；
    新埋伏笔是否已登记
-4. **设定冲突**：地名 / 组织 / 规则与 `world.md` 矛盾之处
+4. **设定冲突**：地名 / 组织 / 规则与 `world.md` 矛盾之处；二创项目加查
+   `facts.md` 红线（时间线 / 地理 / 组织 / 科技水平），矛盾即 P1
+5. **原作保真（仅二创项目）**：OC 接口核查——names.json 中 OC 实体是否登记了
+   接口声明（她是谁 / 为何原作名单里没有她 / 与哪些原作实体相连）；canon core
+   人物长期缺勤对照 cast_policy（min_active_canon_chars_per_volume）给提示
 
 ## 报告置顶：健康度三行（任何模式都要给）
 

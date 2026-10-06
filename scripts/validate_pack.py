@@ -56,6 +56,20 @@ INJECTION_PATTERNS = [
 
 
 def check_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
+    """按 pack.json.kind 分派：canon 包走 canon 检查，其余走风格包检查。"""
+    kind = "style"
+    pj_path = pack_dir / "pack.json"
+    if pj_path.is_file():
+        try:
+            kind = splib.load_json(pj_path).get("kind", "style") or "style"
+        except Exception:  # noqa: BLE001
+            kind = "style"  # 解析错误交给对应检查器报出
+    if kind == "canon":
+        return _check_canon_pack(pack_dir)
+    return _check_style_pack(pack_dir)
+
+
+def _check_style_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warns: list[str] = []
 
@@ -174,6 +188,127 @@ def check_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
 
     # I. thought.md 思想层（v0.3，可选文件）
     _check_thought(pack_dir, errors, warns)
+
+    return errors, warns
+
+
+CANON_FILES = ["pack.json", "terms.json", "characters.json", "card.md",
+               "facts.md", "conventions.md", "sources.md"]
+
+
+def _check_canon_pack(pack_dir: Path) -> tuple[list[str], list[str]]:
+    """canon 包（v0.5）：术语三级表 + 人物红线 + 来源审计 + 摘要纪律。"""
+    errors: list[str] = []
+    warns: list[str] = []
+
+    # A. 必备文件
+    for name in CANON_FILES:
+        if not (pack_dir / name).is_file():
+            errors.append(f"canon 包缺少必备文件：{name}")
+
+    # B. pack.json
+    pj_path = pack_dir / "pack.json"
+    pj = None
+    if pj_path.is_file():
+        try:
+            pj = splib.load_json(pj_path)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"pack.json 无法解析：{e}")
+        if pj is not None:
+            for key in ("format_version", "name", "display_name", "language",
+                        "kind", "version", "created", "updated", "cast_policy",
+                        "provenance", "license_note", "changelog"):
+                if key not in pj:
+                    errors.append(f"pack.json 缺少字段：{key}")
+            if pj.get("kind") != "canon":
+                errors.append("pack.json.kind 应为 \"canon\"")
+            cp = pj.get("cast_policy")
+            if not isinstance(cp, dict):
+                errors.append("pack.json.cast_policy 应为对象")
+            else:
+                for key in ("min_active_canon_chars_per_volume", "ooc_ref"):
+                    if key not in cp:
+                        errors.append(f"cast_policy 缺少字段：{key}")
+
+    # C. card.md ≤ 400 字（复用风格包纪律）
+    card = pack_dir / "card.md"
+    if card.is_file():
+        text = card.read_text(encoding="utf-8")
+        n = sum(1 for c in text if not c.isspace())
+        if n > 400:
+            errors.append(f"card.md 超长：{n} 字（上限 400）")
+
+    # D. terms.json：must / thresholds / ban 结构
+    tp = pack_dir / "terms.json"
+    if tp.is_file():
+        try:
+            terms = splib.load_json(tp)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"terms.json 无法解析：{e}")
+            terms = None
+        if terms is not None:
+            must = terms.get("must")
+            if not isinstance(must, list) or not must:
+                errors.append("terms.json.must 应为非空数组")
+            else:
+                for i, m in enumerate(must):
+                    if not isinstance(m, dict) or not m.get("term"):
+                        errors.append(f"terms.json.must[{i}] 缺少 term")
+                    elif m.get("term") in (m.get("wrong") or []):
+                        errors.append(f"terms.json.must[{i}] 的 wrong 变体包含其自身")
+            scope = (terms.get("thresholds") or {}).get("must_scope")
+            if scope not in (None, "volume", "chapter"):
+                errors.append("terms.json.thresholds.must_scope 只能为 volume|chapter")
+            for i, b in enumerate(terms.get("ban") or []):
+                if not isinstance(b, dict) or not b.get("reason"):
+                    errors.append(f"terms.json.ban[{i}] 缺少 reason（禁用必须给理由）")
+
+    # E. characters.json：roster + tier + core 红线
+    cpath = pack_dir / "characters.json"
+    if cpath.is_file():
+        try:
+            chars = splib.load_json(cpath)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"characters.json 无法解析：{e}")
+            chars = None
+        if chars is not None:
+            roster = chars.get("roster")
+            if not isinstance(roster, list) or not roster:
+                errors.append("characters.json 缺少 roster 数组")
+            else:
+                for i, c in enumerate(roster):
+                    if not isinstance(c, dict) or not c.get("name"):
+                        errors.append(f"characters.json roster[{i}] 缺少 name")
+                        continue
+                    if c.get("tier") not in ("core", "minor"):
+                        errors.append(f"characters.json「{c['name']}」tier 应为 core|minor")
+                    elif c["tier"] == "core" and not c.get("redline"):
+                        warns.append(f"core 角色「{c['name']}」未写 OOC 红线（redline）")
+
+    # F. sources.md：来源 URL + 抓取日期 + 版权声明
+    sp = pack_dir / "sources.md"
+    if sp.is_file():
+        text = sp.read_text(encoding="utf-8")
+        if "http" not in text:
+            errors.append("sources.md 未登记任何来源 URL")
+        if not re.search(r"20\d{2}[-/年.]\s*\d{1,2}[-/月.]\s*\d{1,2}", text):
+            errors.append("sources.md 未登记抓取日期")
+        if "版权" not in text:
+            warns.append("sources.md 未含版权声明段落")
+
+    # G. 摘要纪律 + 自包含 + 注入启发式（canon 包不收原文段落）
+    for md in pack_dir.rglob("*.md"):
+        text = md.read_text(encoding="utf-8")
+        for m in re.finditer(r"^>\s?(.{100,})$", text, flags=re.M):
+            errors.append(f"{md.name}：引文超 100 字，违反 canon 包摘要纪律"
+                          f"（不得收原文段落）")
+        for m in BAD_LINK_RE.finditer(text):
+            errors.append(f"{md.name}：包外链接引用「{m.group(0)}」破坏自包含")
+        for pat in INJECTION_PATTERNS:
+            m = pat.search(text)
+            if m:
+                warns.append(f"{md.name}：疑似指令注入语句「{m.group(0)[:40]}」——"
+                             "放行前必须人工复核语义")
 
     return errors, warns
 

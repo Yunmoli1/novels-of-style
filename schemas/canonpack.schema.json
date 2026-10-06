@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CanonPack manifest (v0.5)",
+  "description": "二创 canon 包的 pack.json 结构；validate_pack.py 的 canon 分支按此校验（脚本为权威实现，schema 供工具链参考）。",
+  "type": "object",
+  "required": [
+    "format_version", "kind", "name", "display_name", "language",
+    "version", "created", "updated", "cast_policy", "provenance",
+    "license_note", "changelog"
+  ],
+  "properties": {
+    "format_version": { "type": "string" },
+    "kind": { "type": "string", "const": "canon" },
+    "name": { "type": "string", "pattern": "^[a-z0-9_-]+$" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "language": { "type": "string" },
+    "version": { "type": "string" },
+    "created": { "type": "string" },
+    "updated": { "type": "string" },
+    "cast_policy": {
+      "type": "object",
+      "required": ["min_active_canon_chars_per_volume", "ooc_ref"],
+      "properties": {
+        "min_active_canon_chars_per_volume": { "type": "integer", "minimum": 0 },
+        "require_interface_for_oc": { "type": "boolean" },
+        "ooc_ref": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "provenance": { "type": "array" },
+    "license_note": { "type": "string" },
+    "changelog": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}
