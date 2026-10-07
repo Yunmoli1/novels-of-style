@@ -19,3 +19,7 @@ Thumbs.db
 fanqie-terraria/
 指挥官零/
 */style/cost.jsonl
+
+# 阶段 0（v0.5.0）：网页工作台产物与敏感数据
+web/site/
+evals/human_judging_answers.json

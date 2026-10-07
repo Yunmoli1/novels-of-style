@@ -2,6 +2,29 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.5.2] - 2026-10-07
+
+### Added
+- **网页工作台阶段 0**（计划书 r4 落地；原定版本号 v0.5.0 已被 canon 层占用，
+  顺延为 0.5.2；零依赖静态站点）：
+  - `web/build_site.py`：判读台（8 回合人工判读，纯客户端 localStorage +
+    导出 JSON）/ 包浏览器（全档渲染）/ 测量可视化（指标容差表、LOO 留一线、
+    motif SVG 横条图）
+  - **双击入口**：`启动工作台.bat` → `web/launch.py`（构建站点 + http.server
+    仅绑 127.0.0.1 随机端口 + 自动开浏览器，无需手动命令行）
+  - `scripts/migrate_human_judging.py`：盲测人工判读包 md → 双 JSON，守卫断言
+    （8 回合 / 带包臂序列 乙甲乙甲甲乙乙乙 / 子代理战绩 6/8）；
+    `evals/human_judging.json` 入仓库，**答案卷 gitignore**（红线 6）
+  - `scripts/score_human_judging.py`：判读导出计分——辨认带包臂命中率 +
+    与子代理判官一致率（同源偏差度量），答案卷缺失时给出补救指引
+- `tests/test_web.py`（12 项）：产物无全文（语料 250 字窗口断言 > 短引上限）、
+  判读页无答案、封闭构建、仅本机绑定、bat 入口接线；总测试 100+9 → **112+9**
+- `web/README.md`；计划书：网页控制台-计划书-r4.md（代码库核实版）+
+  阶段 0 执行规划
+
+### Changed
+- `.gitignore`：`web/site/`、`evals/human_judging_answers.json`
+
 ## [0.5.1] - 2026-10-07
 
 ### Changed

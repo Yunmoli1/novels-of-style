@@ -1,0 +1,402 @@
+# -*- coding: utf-8 -*-
+"""build_site：阶段 0 静态站点生成器（网页控制台 r4 · P0-1/2/3，零依赖）。
+
+用法：
+    python web/build_site.py [--out web/site]
+
+产出（默认 web/site/，gitignore）：
+    index.html               门户
+    judging/index.html       盲测人工判读台（纯客户端：radio + localStorage + 导出 JSON）
+    packs/index.html         包列表
+    packs/<name>/index.html  包全档渲染 + 测量可视化（指标容差表 / LOO 留一线 / motif SVG）
+
+红线落实（tests/test_web.py 锁定）：
+    产物只读 stylepacks/ 与 evals/human_judging.json——语料全文与答案卷
+    （human_judging_answers.json）从不进入构建输入，因此不会出现在产物里；
+    引文 ≤200 字由包内 validate 既有保证。
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import html
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import splib  # noqa: E402
+
+CSS = """:root{--bg:#14161a;--panel:#1d2127;--panel2:#232830;--text:#d8dce2;--muted:#8a919c;--accent:#6ea8fe;--border:#2a2f37;--good:#7bc47f;--bad:#e08585}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{display:flex;min-height:100vh}
+nav{width:190px;flex:0 0 190px;background:var(--panel);border-right:1px solid var(--border);padding:18px 14px;position:sticky;top:0;height:100vh;overflow:auto}
+nav .brand{font-weight:700;margin-bottom:14px;letter-spacing:.5px}
+nav a{display:block;padding:6px 8px;border-radius:6px;color:var(--text);font-size:14px}
+nav a.active,nav a:hover{background:var(--panel2);text-decoration:none}
+nav .sub{padding-left:16px;font-size:13px;color:var(--muted)}
+main{flex:1;padding:26px 34px;max-width:980px}
+h1{font-size:22px;margin:.2em 0 .6em}h2{font-size:18px;margin:1.4em 0 .5em;border-bottom:1px solid var(--border);padding-bottom:4px}h3{font-size:15.5px;margin:1.2em 0 .4em;color:var(--accent)}
+p{margin:.5em 0}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:10px 0}
+.meta{color:var(--muted);font-size:13px}
+table{border-collapse:collapse;margin:8px 0;width:100%}
+th,td{border:1px solid var(--border);padding:4px 10px;text-align:left;font-size:13.5px}
+th{background:var(--panel2)}
+.passage{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:10px 0;font:15.5px/2.0 "Noto Serif SC","Source Han Serif SC","SimSun",serif;white-space:pre-wrap}
+blockquote{margin:.5em 0;padding:6px 14px;border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 8px 8px 0}
+code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
+.btn{display:inline-block;background:var(--accent);color:#10131a;border:0;border-radius:8px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;margin:6px 8px 6px 0}
+.btn.ghost{background:var(--panel2);color:var(--text)}
+.round{margin:26px 0}
+.round .head{font-weight:700;margin-bottom:4px}
+.verdict{margin-top:8px;padding:10px 14px;background:var(--panel2);border-radius:8px}
+.verdict label{margin-right:14px}
+textarea{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font:inherit}
+select,button{font:inherit}
+progress{width:180px;vertical-align:middle}
+footer{color:var(--muted);font-size:12px;margin-top:30px;border-top:1px solid var(--border);padding-top:10px}
+"""
+
+
+def esc(t: str) -> str:
+    return html.escape(t, quote=False)
+
+
+def _inline(t: str) -> str:
+    t = esc(t)
+    t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+    t = re.sub(r"`(.+?)`", r"<code>\1</code>", t)
+    return t
+
+
+import re  # noqa: E402  (推迟到 _inline 之后仅为可读性)
+
+
+def md_to_html(md: str) -> str:
+    """受控 md 子集 → HTML：标题/表格/引用/列表/段落/粗体/行内码。"""
+    out: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    para: list[str] = []
+    def flush_para():
+        if para:
+            out.append(f"<p>{'<br>'.join(_inline(x) for x in para)}</p>")
+            para.clear()
+    while i < len(lines):
+        s = lines[i].rstrip()
+        if not s.strip():
+            flush_para()
+            i += 1
+            continue
+        m = re.match(r"^(#{1,4})\s+(.*)$", s)
+        if m:
+            flush_para()
+            lvl = min(len(m.group(1)) + 1, 5)  # 文件 h1 → 页面 h2，避免与页标题重复
+            out.append(f"<h{lvl}>{_inline(m.group(2))}</h{lvl}>")
+            i += 1
+            continue
+        if s.lstrip().startswith("|"):
+            flush_para()
+            rows: list[list[str]] = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                if not set("".join(cells)) <= set("-: "):
+                    rows.append(cells)
+                i += 1
+            if rows:
+                head = "".join(f"<th>{_inline(c)}</th>" for c in rows[0])
+                body = "".join(
+                    "<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in r) + "</tr>"
+                    for r in rows)
+                out.append(f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>")
+            continue
+        if s.startswith(">"):
+            flush_para()
+            quote: list[str] = []
+            while i < len(lines) and lines[i].startswith(">"):
+                quote.append(lines[i].lstrip(">").strip())
+                i += 1
+            out.append(f"<blockquote>{'<br>'.join(_inline(q) for q in quote if q)}</blockquote>")
+            continue
+        lm = re.match(r"^[-*]\s+(.*)$", s.strip())
+        if lm and not s.startswith(" "):
+            flush_para()
+            items: list[str] = []
+            while i < len(lines):
+                m2 = re.match(r"^[-*]\s+(.*)$", lines[i].strip())
+                if not m2:
+                    break
+                items.append(f"<li>{_inline(m2.group(1))}</li>")
+                i += 1
+            out.append(f"<ul>{''.join(items)}</ul>")
+            continue
+        para.append(s.strip())
+        i += 1
+    flush_para()
+    return "\n".join(out)
+
+
+def layout(title: str, body: str, active: str, rel: str = "../") -> str:
+    def navlink(href, label, key, cls=""):
+        c = f' class="{cls} active"' if key == active else (f' class="{cls}"' if cls else "")
+        return f'<a href="{href}"{c}>{label}</a>'
+    nav = [
+        navlink(f"{rel}index.html", "门户", "home"),
+        navlink(f"{rel}judging/", "盲测判读台", "judging"),
+        navlink(f"{rel}packs/", "包浏览", "packs"),
+    ]
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{esc(title)} · StylePack 工作台</title>
+<link rel="stylesheet" href="{rel}style.css"></head>
+<body><div class="wrap"><nav><div class="brand">StylePack</div>
+{chr(10).join(nav)}
+</nav><main>{body}
+<footer>本地工作台 · 阶段 0（v0.5.0）· 全部数据与渲染均在本机 · 引文 ≤200 字，全文不出库</footer>
+</main></div></body></html>"""
+
+
+def fmt(v) -> str:
+    if isinstance(v, float):
+        return f"{v:g}"
+    return str(v)
+
+
+def bars_svg(items: list[tuple[str, float]], unit: str = "") -> str:
+    """motif 频率横条图（纯 SVG，零依赖）。"""
+    if not items:
+        return ""
+    w, lh, left, maxv = 620, 30, 110, max(v for _, v in items)
+    h = lh * len(items) + 8
+    parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" role="img">']
+    for i, (label, v) in enumerate(items):
+        y = i * lh + 6
+        bw = max(2, (w - left - 60) * v / maxv)
+        parts.append(f'<text x="0" y="{y + 16}" fill="#d8dce2" font-size="14">{esc(label)}</text>')
+        parts.append(f'<rect x="{left}" y="{y}" width="{bw:.1f}" height="20" rx="4" fill="#6ea8fe" opacity="0.85"/>')
+        parts.append(f'<text x="{left + bw + 8:.1f}" y="{y + 16}" fill="#8a919c" font-size="12.5">{v:g}{unit}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+MOTIF_RE = re.compile(r"^\|\s*(.+?)\s*\|\s*([\d.]+)\s*\|")
+
+
+def parse_motif_stats(thought_md: str) -> list[tuple[str, float]]:
+    rows: list[tuple[str, float]] = []
+    in_sec = False
+    for line in thought_md.splitlines():
+        if line.strip().startswith("## "):
+            in_sec = "motif_stats" in line
+            continue
+        if in_sec:
+            m = MOTIF_RE.match(line.strip())
+            if m and m.group(1) != "motif":
+                rows.append((m.group(1), float(m.group(2))))
+    return rows
+
+
+def render_metrics_table(metrics: dict) -> str:
+    rows = []
+    for group, sub in metrics.items():
+        if isinstance(sub, dict) and "target" in sub:
+            sub = {group: sub}
+        for k, v in sub.items():
+            if not isinstance(v, dict) or "target" not in v:
+                continue
+            rows.append(f"<tr><td>{esc(group)} · {esc(k)}</td>"
+                        f"<td>{fmt(v['target'])}</td><td>±{fmt(v.get('tolerance_abs', 0))}</td></tr>")
+    return (f"<table><thead><tr><th>指标</th><th>目标</th><th>容差</th></tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>")
+
+
+def render_fingerprint(fp: dict) -> str:
+    parts = []
+    dp = fp.get("delta_profile", {})
+    parts.append(f'<div class="panel">混合 Delta 档案：样本 <strong>{dp.get("n_samples", "?")}</strong> 篇 · '
+                 f'高频字 <strong>{dp.get("top_n", "?")}</strong> 个'
+                 f'<div class="meta">{esc(str(fp.get("notes", ""))[:220])}</div></div>')
+    for g, layer in sorted(fp.get("genres", {}).items()):
+        samples = layer.get("samples", [])
+        sc = (fp.get("self_check", {}) or {}).get(g, {})
+        loo = sc.get("delta_max")
+        loo_txt = (f"留一及格线 delta_max=<strong>{fmt(loo)}</strong>（p50={fmt(sc.get('delta_p50'))}，n={sc.get('n')}）"
+                   if loo is not None else f"不可标定（{esc(str(sc.get('note', 'n<3')))}）——该层 Delta 暂不进判定")
+        parts.append(f"<h3>文体层：{esc(g)}（{len(samples)} 篇 · {fmt(layer.get('chars_total', 0))} 字）</h3>")
+        parts.append(f'<div class="panel">{loo_txt}</div>')
+        parts.append(render_metrics_table(layer.get("metrics", {})))
+    return "\n".join(parts)
+
+
+def render_pack_page(name: str, pack_dir: Path) -> str:
+    meta = splib.load_json(pack_dir / "pack.json")
+    fp = splib.load_json(pack_dir / "fingerprint.json")
+    body = [f"<h1>{esc(meta.get('display_name', name))} <span class='meta'>v{esc(meta.get('version', '?'))}"
+            f" · format {esc(str(meta.get('format_version', '?')))} · 更新 {esc(meta.get('updated', '?'))}</span></h1>"]
+    body.append("<h2>能力与语料</h2><div class='panel'>"
+                f"genres：{esc('、'.join(meta.get('genres', [])))} ｜ 能力标记："
+                f"thought={'✓' if meta.get('thought') else '✗'} ｜ "
+                f"corpus：{len(meta.get('corpus', {}).get('works', []))} 篇 · "
+                f"{fmt(meta.get('corpus', {}).get('total_chars', 0))} 字"
+                f"<div class='meta'>{esc(str(meta.get('corpus', {}).get('confidence', '')))}</div></div>")
+    for fname, label in (("card.md", "卡片"), ("profile.md", "文风档案 profile"),
+                         ("thought.md", "思想档案 thought"), ("exemplars.md", "范例 exemplars"),
+                         ("lexicon.md", "词汇 lexicon"), ("limits.md", "能力边界 limits")):
+        p = pack_dir / fname
+        if p.is_file():
+            body.append(f"<h2>{label}</h2>")
+            body.append(md_to_html(splib.read_text(p)[0]))
+    body.append("<h2>测量可视化（fingerprint）</h2>")
+    body.append(render_fingerprint(fp))
+    thought = pack_dir / "thought.md"
+    if thought.is_file():
+        motifs = parse_motif_stats(splib.read_text(thought)[0])
+        if motifs:
+            body.append("<h3>motif 频率（advisory，永不进判定）</h3>")
+            body.append(f'<div class="panel">{bars_svg(motifs, " /千字")}</div>')
+    cl = meta.get("changelog", [])
+    if cl:
+        rows = "".join(f"<tr><td>{esc(c.get('version', ''))}</td><td>{esc(c.get('date', ''))}</td>"
+                       f"<td>{esc(str(c.get('changes', '')))}</td></tr>" for c in cl[-3:])
+        body.append(f"<h2>最近变更</h2><table><thead><tr><th>版本</th><th>日期</th><th>内容</th></tr></thead>"
+                    f"<tbody>{rows}</tbody></table>")
+    return layout(f"{meta.get('display_name', name)} 包", "\n".join(body), "packs", rel="../../")
+
+
+def render_judging(data: dict, out_time: str) -> str:
+    payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    body = ["""<h1>盲测人工判读台</h1>
+<p class="meta">同源模型判官已有 8 轮记录；你是同源偏差的最终解法。答案卷不在此页、不在此站点——判完导出结果，交给 <code>scripts/score_human_judging.py</code> 计分。</p>
+<div class="panel">"""]
+    for i, ins in enumerate(data.get("instruction", []), 1):
+        body.append(f"<p>{i}. {esc(ins)}</p>")
+    body.append("</div>")
+    body.append(f'<p><progress id="prog" value="0" max="{len(data["rounds"])}"></progress> '
+                f'<span id="progtext" class="meta">0 / {len(data["rounds"])} 已判</span>'
+                '<button class="btn" id="export">导出判读结果</button>'
+                '<button class="btn ghost" id="clear">清空本机暂存</button></p>')
+    for r in data["rounds"]:
+        body.append(f"""<div class="round panel" data-rid="{r['id']}">
+<div class="head">回合 {r['id']}（{esc(r['author'])}）· 题：{esc(r['title'])}</div>
+<div class="passage">【甲】{esc(r['甲'])}</div>
+<div class="passage">【乙】{esc(r['乙'])}</div>
+<div class="verdict">你的判读：
+<label><input type="radio" name="c{r['id']}" value="甲">甲</label>
+<label><input type="radio" name="c{r['id']}" value="乙">乙</label>
+<label><input type="radio" name="c{r['id']}" value="都不像">都不像</label>
+<label>置信度 <select name="f{r['id']}"><option value=""></option><option>高</option><option>中</option><option>低</option></select></label>
+<br><textarea name="r{r['id']}" rows="2" placeholder="一两句理由（可选）"></textarea>
+</div></div>""")
+    body.append(f"""<script id="judging-data" type="application/json">{payload}</script>
+<script>
+const DATA = JSON.parse(document.getElementById('judging-data').textContent);
+const KEY = 'stylepack_judging_v1';
+const state = JSON.parse(localStorage.getItem(KEY) || '{{}}');
+function save() {{
+  localStorage.setItem(KEY, JSON.stringify(state));
+  let n = 0;
+  for (const r of DATA.rounds) if (state[r.id] && state[r.id].choice) n++;
+  document.getElementById('prog').value = n;
+  document.getElementById('progtext').textContent = n + ' / ' + DATA.rounds.length + ' 已判';
+}}
+function bind() {{
+  for (const r of DATA.rounds) {{
+    const box = document.querySelector('.round[data-rid="' + r.id + '"]');
+    const pick = (k, v) => {{ (state[r.id] = state[r.id] || {{}})[k] = v; save(); }};
+    box.addEventListener('change', e => {{
+      if (e.target.name === 'c' + r.id) pick('choice', e.target.value);
+      if (e.target.name === 'f' + r.id) pick('confidence', e.target.value);
+    }});
+    box.querySelector('textarea').addEventListener('input', e => pick('reason', e.target.value));
+    const s = state[r.id] || {{}};
+    if (s.choice) box.querySelector('input[value="' + s.choice + '"]').checked = true;
+    if (s.confidence) box.querySelector('select').value = s.confidence;
+    if (s.reason) box.querySelector('textarea').value = s.reason;
+  }}
+  save();
+}}
+document.getElementById('export').addEventListener('click', () => {{
+  const rounds = DATA.rounds.map(r => ({{
+    id: r.id, title: r.title,
+    ...(state[r.id] || {{ choice: '', confidence: '', reason: '' }})
+  }});
+  const blob = new Blob([JSON.stringify({{
+    exported_at: new Date().toISOString(), protocol: DATA.protocol, rounds
+  }}, null, 2)], {{ type: 'application/json' }});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'human_judging_results.json';
+  a.click();
+  alert('已导出。把文件交给：python scripts/score_human_judging.py human_judging_results.json');
+}});
+document.getElementById('clear').addEventListener('click', () => {{
+  if (!confirm('清空本机暂存的判读进度？')) return;
+  localStorage.removeItem(KEY);
+  location.reload();
+}});
+bind();
+</script>""")
+    return layout("盲测判读台", "\n".join(body), "judging", rel="../")
+
+
+def build(out_dir: Path, repo: Path = ROOT) -> Path:
+    packs_dir = repo / "stylepacks"
+    packs = sorted(d for d in packs_dir.iterdir() if (d / "pack.json").is_file())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "judging").mkdir(exist_ok=True)
+    (out_dir / "packs").mkdir(exist_ok=True)
+    (out_dir / "style.css").write_text(CSS, encoding="utf-8", newline="\n")
+
+    judging_data = splib.load_json(repo / "evals" / "human_judging.json")
+    stamp = datetime.date.today().isoformat()
+
+    (out_dir / "index.html").write_text(layout("门户", f"""<h1>StylePack 本地工作台</h1>
+<div class="panel">一台引擎，三张脸：CLI / MCP / <strong>Web</strong> 共用同一套脚本与包文件。
+本站为阶段 0（判读 + 浏览），全部渲染在本机完成；判读进度只存本机浏览器（localStorage），
+导出 JSON 后由 <code>scripts/score_human_judging.py</code> 对照本机答案卷计分。</div>
+<h2>入口</h2>
+<ul><li><a href="judging/">盲测人工判读台（8 回合）</a>——解锁同源偏差度量</li>
+<li><a href="packs/">风格包浏览 + 测量可视化</a></li></ul>
+<p class="meta">构建日期：{stamp} · 引文 ≤200 字；语料全文与判读答案永不进入本站点。</p>""", "home"),
+                     encoding="utf-8", newline="\n")
+
+    (out_dir / "judging" / "index.html").write_text(
+        render_judging(judging_data, stamp), encoding="utf-8", newline="\n")
+
+    cards = []
+    for d in packs:
+        meta = splib.load_json(d / "pack.json")
+        cards.append(f"""<div class="panel"><strong><a href="{d.name}/">{esc(meta.get('display_name', d.name))}</a></strong>
+<span class="meta">v{esc(meta.get('version', '?'))} · 更新 {esc(meta.get('updated', '?'))} ·
+{len(meta.get('corpus', {}).get('works', []))} 篇 {fmt(meta.get('corpus', {}).get('total_chars', 0))} 字
+· thought={'✓' if meta.get('thought') else '✗'}</span>
+<div class="meta">{esc(str(meta.get('corpus', {}).get('confidence', ''))[:120])}</div></div>""")
+    (out_dir / "packs" / "index.html").write_text(
+        layout("包浏览", "<h1>风格包</h1>" + "\n".join(cards), "packs", rel="../"),
+        encoding="utf-8", newline="\n")
+
+    for d in packs:
+        page = render_pack_page(d.name, d)
+        (out_dir / "packs" / d.name).mkdir(exist_ok=True)
+        (out_dir / "packs" / d.name / "index.html").write_text(
+            page, encoding="utf-8", newline="\n")
+
+    print(f"站点已生成：{out_dir}（{len(packs)} 个包 + 判读台）")
+    return out_dir
+
+
+def main() -> int:
+    splib.force_utf8_stdio()
+    ap = argparse.ArgumentParser(description="StylePack 阶段 0 静态站点生成器")
+    ap.add_argument("--out", default=str(ROOT / "web" / "site"))
+    args = ap.parse_args()
+    build(Path(args.out))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
