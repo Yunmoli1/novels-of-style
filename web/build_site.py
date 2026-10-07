@@ -147,6 +147,7 @@ def layout(title: str, body: str, active: str, rel: str = "../") -> str:
         navlink(f"{rel}index.html", "门户", "home"),
         navlink(f"{rel}judging/", "盲测判读台", "judging"),
         navlink(f"{rel}packs/", "包浏览", "packs"),
+        navlink(f"{rel}canon/", "canon 包", "canon"),
     ]
     return f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -156,7 +157,7 @@ def layout(title: str, body: str, active: str, rel: str = "../") -> str:
 <body><div class="wrap"><nav><div class="brand">StylePack</div>
 {chr(10).join(nav)}
 </nav><main>{body}
-<footer>本地工作台 · 阶段 0（v0.5.0）· 全部数据与渲染均在本机 · 引文 ≤200 字，全文不出库</footer>
+<footer>本地工作台 · 阶段 0（v0.5.2）· 全部数据与渲染均在本机 · 引文 ≤200 字，全文不出库</footer>
 </main></div></body></html>"""
 
 
@@ -323,7 +324,7 @@ document.getElementById('export').addEventListener('click', () => {{
   const rounds = DATA.rounds.map(r => ({{
     id: r.id, title: r.title,
     ...(state[r.id] || {{ choice: '', confidence: '', reason: '' }})
-  }});
+  }}));
   const blob = new Blob([JSON.stringify({{
     exported_at: new Date().toISOString(), protocol: DATA.protocol, rounds
   }}, null, 2)], {{ type: 'application/json' }});
@@ -343,6 +344,75 @@ bind();
     return layout("盲测判读台", "\n".join(body), "judging", rel="../")
 
 
+def render_term_table(items: list) -> str:
+    """术语条目通用表（must: term/wrong/note；ban: term/reason）；纯字符串列表兼容。"""
+    if not items:
+        return "<p class='meta'>（无）</p>"
+    if not isinstance(items[0], dict):
+        rows = "".join(f"<li>{esc(str(x))}</li>" for x in items)
+        return f"<ul>{rows}</ul>"
+    cols: list[str] = []
+    for it in items:
+        for k in it:
+            if k not in cols:
+                cols.append(k)
+    head = "".join(f"<th>{esc(c)}</th>" for c in cols)
+    rows = []
+    for it in items:
+        cells = []
+        for c in cols:
+            v = it.get(c, "")
+            if isinstance(v, list):
+                v = "、".join(str(x) for x in v)
+            cells.append(f"<td>{esc(str(v))}</td>")
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return (f"<table><thead><tr>{head}</tr></thead>"
+            f"<tbody>{''.join(rows)}</tbody></table>")
+
+
+def render_canon_page(name: str, pack_dir: Path) -> str:
+    meta = splib.load_json(pack_dir / "pack.json")
+    body = [f"<h1>{esc(meta.get('display_name', name))} "
+            f"<span class='meta'>v{esc(meta.get('version', '?'))} · "
+            f"更新 {esc(meta.get('updated', '?'))}</span></h1>"]
+    for fname, label in (("card.md", "卡片"), ("facts.md", "事实源 facts"),
+                         ("conventions.md", "写作约定 conventions"),
+                         ("sources.md", "来源 sources")):
+        p = pack_dir / fname
+        if p.is_file():
+            body.append(f"<h2>{label}</h2>")
+            body.append(md_to_html(splib.read_text(p)[0]))
+    ch = pack_dir / "characters.json"
+    if ch.is_file():
+        c = splib.load_json(ch)
+        roster = c.get("roster", [])
+        body.append(f"<h2>角色名册（{len(roster)} 人）</h2>")
+        rows = "".join(
+            f"<tr><td>{esc(str(p.get('name', '')))}</td><td>{esc(str(p.get('tier', '')))}</td>"
+            f"<td>{esc(str(p.get('role', '')))}</td><td>{esc(str(p.get('redline', '')))}</td></tr>"
+            for p in roster)
+        body.append("<table><thead><tr><th>角色</th><th>tier</th><th>定位</th><th>红线/要点</th>"
+                    "</tr></thead><tbody>" + rows + "</tbody></table>")
+    t = pack_dir / "terms.json"
+    if t.is_file():
+        terms = splib.load_json(t)
+        body.append("<h2>术语判据（terms）</h2>")
+        th = terms.get("thresholds") or {}
+        if th:
+            body.append("<p class='meta'>" +
+                        esc("；".join(f"{k}={v}" for k, v in th.items())) + "</p>")
+        for key, label in (("must", "must（必须正确使用的术语）"),
+                           ("allow", "allow（允许用法）"),
+                           ("ban", "ban（禁用/错写）")):
+            items = terms.get(key) or []
+            body.append(f"<h3>{label}（{len(items)}）</h3>")
+            body.append(render_term_table(items))
+        if terms.get("allow_note"):
+            body.append(f"<p class='meta'>{esc(str(terms['allow_note']))}</p>")
+    return layout(f"{meta.get('display_name', name)} canon 包",
+                  "\n".join(body), "canon", rel="../../")
+
+
 def build(out_dir: Path, repo: Path = ROOT) -> Path:
     packs_dir = repo / "stylepacks"
     packs = sorted(d for d in packs_dir.iterdir() if (d / "pack.json").is_file())
@@ -360,7 +430,8 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
 导出 JSON 后由 <code>scripts/score_human_judging.py</code> 对照本机答案卷计分。</div>
 <h2>入口</h2>
 <ul><li><a href="judging/">盲测人工判读台（8 回合）</a>——解锁同源偏差度量</li>
-<li><a href="packs/">风格包浏览 + 测量可视化</a></li></ul>
+<li><a href="packs/">风格包浏览 + 测量可视化</a></li>
+<li><a href="canon/">canon 包（二创约束）</a></li></ul>
 <p class="meta">构建日期：{stamp} · 引文 ≤200 字；语料全文与判读答案永不进入本站点。</p>""", "home"),
                      encoding="utf-8", newline="\n")
 
@@ -385,7 +456,29 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
         (out_dir / "packs" / d.name / "index.html").write_text(
             page, encoding="utf-8", newline="\n")
 
-    print(f"站点已生成：{out_dir}（{len(packs)} 个包 + 判读台）")
+    # canon 包（v0.5.0 引入的 canonpacks 类型，v0.5.2 补渲染）
+    canon_src = repo / "canonpacks"
+    canonpacks = sorted(d for d in canon_src.iterdir()
+                        if (d / "pack.json").is_file()) if canon_src.is_dir() else []
+    (out_dir / "canon").mkdir(exist_ok=True)
+    canon_cards = []
+    for d in canonpacks:
+        meta = splib.load_json(d / "pack.json")
+        canon_cards.append(
+            f"""<div class="panel"><strong><a href="{d.name}/">{esc(meta.get('display_name', d.name))}</a></strong>
+<span class="meta">canon · v{esc(meta.get('version', '?'))} · 更新 {esc(meta.get('updated', '?'))}</span></div>""")
+    if not canon_cards:
+        canon_cards.append("<p class='meta'>（仓库内暂无 canonpacks/）</p>")
+    (out_dir / "canon" / "index.html").write_text(
+        layout("canon 包", "<h1>canon 包（二创约束引导）</h1>" + "\n".join(canon_cards),
+               "canon", rel="../"),
+        encoding="utf-8", newline="\n")
+    for d in canonpacks:
+        (out_dir / "canon" / d.name).mkdir(exist_ok=True)
+        (out_dir / "canon" / d.name / "index.html").write_text(
+            render_canon_page(d.name, d), encoding="utf-8", newline="\n")
+
+    print(f"站点已生成：{out_dir}（{len(packs)} 个风格包 + {len(canonpacks)} 个 canon 包 + 判读台）")
     return out_dir
 
 

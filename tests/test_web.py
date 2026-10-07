@@ -64,8 +64,35 @@ class TestBuildSite(unittest.TestCase):
     def test_pages_exist(self):
         for rel in ("index.html", "judging/index.html", "packs/index.html",
                     "packs/luxun/index.html", "packs/zhuziqing/index.html",
+                    "canon/index.html", "canon/zhuifang/index.html",
                     "style.css"):
             self.assertTrue((self.site / rel).is_file(), rel)
+
+    def test_canon_page_renders_terms_and_roster(self):
+        t = (self.site / "canon" / "zhuifang" / "index.html").read_text(encoding="utf-8")
+        for word in ("追放", "艾莫号", "must", "ban", "角色名册"):
+            self.assertIn(word, t)
+
+    def test_judging_inline_js_balanced(self):
+        """锁死 v0.5.2 的判读台全失效根因：f-string 丢括号致整段 JS 语法错误
+        （症状：计数器停在 0/8、localStorage 永不写入、切页不恢复）。"""
+        import re as _re
+        j = (self.site / "judging" / "index.html").read_text(encoding="utf-8")
+        m = _re.search(r"<script>(.*?)</script>", j, _re.S)
+        self.assertIsNotNone(m, "判读页缺少内联脚本")
+        src = m.group(1)
+        src = _re.sub(r"'(?:\\.|[^'\\])*'", "''", src)
+        src = _re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
+        src = _re.sub(r"//[^\n]*", "", src)
+        pairs = {")": "(", "]": "[", "}": "{"}
+        stack: list[str] = []
+        for ch in src:
+            if ch in "([{":
+                stack.append(ch)
+            elif ch in ")]}":
+                self.assertTrue(stack and stack.pop() == pairs[ch],
+                                "判读页内联 JS 括号不配平")
+        self.assertEqual(stack, [], "判读页内联 JS 括号不配平")
 
     def test_pack_page_renders_sections(self):
         t = (self.site / "packs" / "zhuziqing" / "index.html").read_text(encoding="utf-8")

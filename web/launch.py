@@ -25,7 +25,20 @@ import splib  # noqa: E402
 import build_site  # noqa: E402
 
 
-def free_port() -> int:
+def preferred_port() -> int:
+    """固定首选端口（8765 起）：localStorage 按 origin（含端口）隔离，
+    端口稳定才能让判读进度跨重启续存；被占用则顺延，最后才随机。"""
+    for p in range(8765, 8780):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", p))
+                return p
+            except OSError:
+                continue
+    return random_fallback_port()
+
+
+def random_fallback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -50,7 +63,7 @@ def main() -> int:
         print("构建完成（--build-only，不启动服务）。")
         return 0
 
-    port = args.port or free_port()
+    port = args.port or preferred_port()
     handler = functools.partial(http.server.SimpleHTTPRequestHandler,
                                 directory=str(site))
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
