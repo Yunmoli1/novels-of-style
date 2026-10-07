@@ -23,3 +23,6 @@ fanqie-terraria/
 # 阶段 0（v0.5.0）：网页工作台产物与敏感数据
 web/site/
 evals/human_judging_answers.json
+
+# 非公版作者包（本地层）：统一在家园目录内，但永不入公开仓库
+stylepacks/local/

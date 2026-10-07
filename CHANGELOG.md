@@ -2,6 +2,26 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.5.3] - 2026-10-07
+
+### Added
+- **风格包统一管理死规矩落地**（用户立项；计划书/风格包统一管理-执行规划.md）：
+  `stylepacks/` = 作者风格包唯一家园，顶层公版层（入库）+ `local/` 本地层
+  （非公版，gitignore，工作台可枚举、永不入库/入 zip）；`canonpacks/` =
+  canon 包唯一家园；语料唯一家 `downloads/corpus/`（工作区级）
+- 网页工作台枚举 local 层：包列表与详情页带"[本地·不得公开再分发]"徽标，
+  本地三个包（无双兔/游鱼怀月/雨落三千河）入库面即现在站点可见
+- 仓库结构守卫测试：stylepacks/ 顶层子目录必须含 pack.json（local/ 豁免）
+
+### Changed
+- 工作区重整：三个非公版包迁入 stylepacks/local/（原散落于仓库外
+  stylepacks-ciweimao/、stylepacks-fanqie/ 项目目录内）；根 corpus/ 并入
+  downloads/corpus/legacy-root-corpus/（33 文件零丢失，含 zhuziqing 旧
+  ingest 分章版）；`packs/narrative/REFERENCE.md` → `docs/references/narrative.md`
+  （第三个 packs 目录消除，两包 limits.md 引用同步）
+- pack.py dist 打包排除 local/；.gitignore 加 stylepacks/local/；
+  README 仓库结构节更新
+
 ## [0.5.2] - 2026-10-07
 
 ### Added

@@ -73,6 +73,30 @@ class TestBuildSite(unittest.TestCase):
         for word in ("追放", "艾莫号", "must", "ban", "角色名册"):
             self.assertIn(word, t)
 
+    def test_local_tier_badge_when_present(self):
+        local = S / "stylepacks" / "local"
+        if not local.is_dir() or not any(local.iterdir()):
+            self.skipTest("本机无 local 层包（CI）")
+        t = (self.site / "packs" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("本地·不得公开再分发", t)
+        first = sorted(p.name for p in local.iterdir() if (p / "pack.json").is_file())[0]
+        self.assertTrue((self.site / "packs" / "local" / first / "index.html").is_file())
+        detail = (self.site / "packs" / "local" / first / "index.html").read_text(encoding="utf-8")
+        self.assertIn("不得公开再分发", detail)
+
+    def test_local_tier_gitignored(self):
+        gi = (S / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("stylepacks/local/", gi)
+
+    def test_packs_home_structure_guard(self):
+        """死规矩（风格包统一管理）：stylepacks/ 顶层子目录必须含 pack.json，
+        单文件导出 *.stylepack.md 例外；local/ 是指定的本地层目录，豁免。"""
+        sp = S / "stylepacks"
+        for child in sp.iterdir():
+            if child.is_dir() and child.name != "local":
+                self.assertTrue((child / "pack.json").is_file(),
+                                f"stylepacks/{child.name} 缺 pack.json，违反包家园结构守卫")
+
     def test_judging_inline_js_balanced(self):
         """锁死 v0.5.2 的判读台全失效根因：f-string 丢括号致整段 JS 语法错误
         （症状：计数器停在 0/8、localStorage 永不写入、切页不恢复）。"""

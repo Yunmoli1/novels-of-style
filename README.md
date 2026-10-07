@@ -38,13 +38,15 @@ python scripts/export_pack.py stylepacks/luxun --out my.stylepack.md
 ## 仓库结构
 
 ```
+canonpacks/      canon 包唯一家园（世界观 / 二创约束，自写内容，入库）
 core/skills/     12 个技能：建档、写作、批改、验收、一致性、反馈、精读、盲测…
-packs/           类型包（narrative 已发布；game / learning 于后续版本）
-stylepacks/      风格包（自带公版示例：luxun、zhuziqing，含 Delta 档案）
+docs/            使用说明、宿主适配、写作参考（docs/references/）
 schemas/         pack.json JSON Schema（版本化）
 scripts/         零依赖脚本：ingest / fp_extract / fp_check / validate / export / story / cost…
 server/          MCP server（JSON-RPC stdio，10 工具）+ 状态机 store
-docs/            使用说明与各宿主安装适配
+stylepacks/      作者风格包唯一家园：顶层 = 公版包（自带 luxun、zhuziqing 示例）；
+                 local/ = 非公版本地包（gitignore：license 为"不得公开再分发"，
+                 本地工作台可枚举、永不入库不入 zip）
 ```
 
 ## 设计原则

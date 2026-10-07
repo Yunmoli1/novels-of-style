@@ -233,10 +233,13 @@ def render_fingerprint(fp: dict) -> str:
     return "\n".join(parts)
 
 
-def render_pack_page(name: str, pack_dir: Path) -> str:
+def render_pack_page(name: str, pack_dir: Path, is_local: bool = False) -> str:
+    tier = ("<span style='color:var(--bad)'>[本地包·不得公开再分发]</span> "
+            if is_local else "")
+    rel = "../../../" if is_local else "../../"
     meta = splib.load_json(pack_dir / "pack.json")
     fp = splib.load_json(pack_dir / "fingerprint.json")
-    body = [f"<h1>{esc(meta.get('display_name', name))} <span class='meta'>v{esc(meta.get('version', '?'))}"
+    body = [f"<h1>{tier}{esc(meta.get('display_name', name))} <span class='meta'>v{esc(meta.get('version', '?'))}"
             f" · format {esc(str(meta.get('format_version', '?')))} · 更新 {esc(meta.get('updated', '?'))}</span></h1>"]
     body.append("<h2>能力与语料</h2><div class='panel'>"
                 f"genres：{esc('、'.join(meta.get('genres', [])))} ｜ 能力标记："
@@ -265,7 +268,7 @@ def render_pack_page(name: str, pack_dir: Path) -> str:
                        f"<td>{esc(str(c.get('changes', '')))}</td></tr>" for c in cl[-3:])
         body.append(f"<h2>最近变更</h2><table><thead><tr><th>版本</th><th>日期</th><th>内容</th></tr></thead>"
                     f"<tbody>{rows}</tbody></table>")
-    return layout(f"{meta.get('display_name', name)} 包", "\n".join(body), "packs", rel="../../")
+    return layout(f"{meta.get('display_name', name)} 包", "\n".join(body), "packs", rel=rel)
 
 
 def render_judging(data: dict, out_time: str) -> str:
@@ -413,9 +416,21 @@ def render_canon_page(name: str, pack_dir: Path) -> str:
                   "\n".join(body), "canon", rel="../../")
 
 
-def build(out_dir: Path, repo: Path = ROOT) -> Path:
+def iter_packs(repo: Path) -> list[tuple[Path, bool]]:
+    """作者风格包唯一家园枚举：stylepacks/ 顶层 = 公版层；stylepacks/local/ = 本地层。
+    死规矩（风格包统一管理-执行规划）：一切消费者只从这里枚举。"""
     packs_dir = repo / "stylepacks"
-    packs = sorted(d for d in packs_dir.iterdir() if (d / "pack.json").is_file())
+    out = [(d, False) for d in sorted(packs_dir.iterdir())
+           if d.is_dir() and (d / "pack.json").is_file()]
+    local = packs_dir / "local"
+    if local.is_dir():
+        out += [(d, True) for d in sorted(local.iterdir())
+                if d.is_dir() and (d / "pack.json").is_file()]
+    return out
+
+
+def build(out_dir: Path, repo: Path = ROOT) -> Path:
+    packs = iter_packs(repo)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "judging").mkdir(exist_ok=True)
     (out_dir / "packs").mkdir(exist_ok=True)
@@ -439,9 +454,11 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
         render_judging(judging_data, stamp), encoding="utf-8", newline="\n")
 
     cards = []
-    for d in packs:
+    for d, is_local in packs:
         meta = splib.load_json(d / "pack.json")
-        cards.append(f"""<div class="panel"><strong><a href="{d.name}/">{esc(meta.get('display_name', d.name))}</a></strong>
+        tier = '<span style="color:var(--bad)">[本地·不得公开再分发]</span> ' if is_local else ""
+        href = f"local/{d.name}/" if is_local else f"{d.name}/"
+        cards.append(f"""<div class="panel">{tier}<strong><a href="{href}">{esc(meta.get('display_name', d.name))}</a></strong>
 <span class="meta">v{esc(meta.get('version', '?'))} · 更新 {esc(meta.get('updated', '?'))} ·
 {len(meta.get('corpus', {}).get('works', []))} 篇 {fmt(meta.get('corpus', {}).get('total_chars', 0))} 字
 · thought={'✓' if meta.get('thought') else '✗'}</span>
@@ -450,10 +467,11 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
         layout("包浏览", "<h1>风格包</h1>" + "\n".join(cards), "packs", rel="../"),
         encoding="utf-8", newline="\n")
 
-    for d in packs:
-        page = render_pack_page(d.name, d)
-        (out_dir / "packs" / d.name).mkdir(exist_ok=True)
-        (out_dir / "packs" / d.name / "index.html").write_text(
+    for d, is_local in packs:
+        page = render_pack_page(d.name, d, is_local)
+        base = out_dir / "packs" / ("local" if is_local else "")
+        (base / d.name).mkdir(parents=True, exist_ok=True)
+        (base / d.name / "index.html").write_text(
             page, encoding="utf-8", newline="\n")
 
     # canon 包（v0.5.0 引入的 canonpacks 类型，v0.5.2 补渲染）
