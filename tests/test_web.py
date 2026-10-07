@@ -189,9 +189,16 @@ class TestLauncher(unittest.TestCase):
     def test_bat_entry_exists_and_wired(self):
         bat = S / "启动工作台.bat"
         self.assertTrue(bat.is_file(), "双击入口缺失")
-        content = bat.read_text(encoding="utf-8")
+        raw = bat.read_bytes()
+        # cmd 解析 LF-only 批处理时 goto/标签不可靠（v0.5.2 启动失败的根因）——
+        # 行尾必须是 CRLF，行为锁定
+        crlf = b"\r\n"
+        self.assertIn(crlf, raw, "bat 必须是 CRLF 行尾")
+        self.assertNotIn(b" \n", raw.replace(crlf, b""))
+        content = raw.decode("utf-8")
         self.assertIn("launch.py", content)
         self.assertIn("pause", content)
+        self.assertIn("%*", content)  # 参数透传（--port/--build-only 等）
 
     def test_redline_localhost_binding(self):
         src = LAUNCH.read_text(encoding="utf-8")

@@ -1,0 +1,2 @@
+# 批处理文件必须 CRLF：cmd 对 LF-only 的 goto/标签解析不可靠（v0.5.2 启动失败根因）
+*.bat text eol=crlf
