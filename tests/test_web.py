@@ -163,10 +163,10 @@ class TestMigrate(unittest.TestCase):
 
     def test_fixture_two_round_answer_mapping(self):
         """2 回合夹具过不了 8 回合守卫，但答案映射逻辑可经真实迁移产物反向验证。"""
+        if not (S / "evals" / "human_judging_answers.json").is_file():
+            self.skipTest("本机无答案卷（CI 无此 gitignore 文件）")
         j = json.loads((S / "evals" / "human_judging.json").read_text(encoding="utf-8"))
         a = json.loads((S / "evals" / "human_judging_answers.json").read_text(encoding="utf-8"))
-        if not (S / "evals" / "human_judging_answers.json").is_file():
-            self.skipTest("本机无答案卷")
         self.assertEqual([r["id"] for r in j["rounds"]], [x["id"] for x in a["rounds"]])
         for r, x in zip(j["rounds"], a["rounds"]):
             self.assertEqual(r["title"], x["title"])
