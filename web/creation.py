@@ -14,8 +14,39 @@ import json
 import re
 
 
+def _repair_truncated(text: str) -> str:
+    """best-effort 修复被 max_tokens 截断的 JSON：补引号、去尾逗号、闭合括号。"""
+    stack: list[str] = []
+    in_str = esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    out = text + ('"' if in_str else "")
+    out = re.sub(r"[,:\s]+$", "", out)
+    out = re.sub(r",\s*(?=[}\]]|$)", "", out)
+    for ch in reversed(stack):
+        out += "}" if ch == "{" else "]"
+    json.loads(out)  # 仍失败则抛给调用方
+    return out
+
+
 def extract_json(text: str) -> dict:
-    """从模型回复中提取第一个完整 JSON 对象（容忍 ```json 围栏与前后废话）。"""
+    """从模型回复中提取第一个 JSON 对象（容忍围栏/废话/max_tokens 截断——
+    截断时按括号栈 best-effort 补齐，真实场景（立意 2–3 项被 1200 token
+    截断）实测可救回前几项）。"""
     text = re.sub(r"```(?:json)?", "", text)
     start = text.find("{")
     if start < 0:
@@ -28,7 +59,10 @@ def extract_json(text: str) -> dict:
             depth -= 1
             if depth == 0:
                 return json.loads(text[start:i + 1])
-    raise ValueError("模型回复中 JSON 未闭合")
+    try:
+        return json.loads(_repair_truncated(text[start:]))
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"模型回复中 JSON 未闭合且无法修复（{exc}）") from exc
 
 
 SYSTEM = ("你是严格的网文章节共创助手。所有输出必须是可解析的 JSON 或纯正文，"

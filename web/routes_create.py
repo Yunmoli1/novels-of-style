@@ -238,7 +238,7 @@ def do_outline(body: OutlineIn):
         body.chapter_no, body.keywords, cfg.get("context_budget_tokens", 24000))
     prompt = creation.outline_prompt(body.chapter_no, body.title, body.keywords,
                                      assembly["kept_texts"], body.user_notes)
-    result = _do_model(cfg, "write", sid, prompt, 1200, True)
+    result = _do_model(cfg, "write", sid, prompt, 2200, True)
     return {"session_id": sid, "options": result["json"].get("options", []),
             "recommended": result["json"].get("recommended", 0),
             "usage": result, "assembly": {k: v for k, v in assembly.items()
@@ -261,7 +261,7 @@ def do_beats(body: BeatsIn):
                   else "")
     prompt = creation.beats_prompt(body.chapter_no, body.title, body.chosen,
                                    assembly["kept_texts"], canon_note)
-    result = _do_model(cfg, "write", sid, prompt, 1500, True)
+    result = _do_model(cfg, "write", sid, prompt, 2400, True)
     return {"session_id": sid, **result["json"], "usage": result}
 
 
@@ -280,7 +280,7 @@ def do_reroll(body: RerollIn):
     prompt = creation.reroll_beat_prompt(body.chapter_no, body.title, body.chosen,
                                          body.beats, body.index,
                                          assembly["kept_texts"])
-    result = _do_model(cfg, "write", sid, prompt, 400, True)
+    result = _do_model(cfg, "write", sid, prompt, 600, True)
     return {"session_id": sid, "beat": result["json"], "usage": result}
 
 
@@ -335,7 +335,7 @@ def do_ending(body: EndingIn):
     sid = _session_id(body)
     tail = body.text[-800:]
     prompt = creation.ending_check_prompt(body.title, tail)
-    result = _do_model(cfg, "judge", sid, prompt, 300, True)
+    result = _do_model(cfg, "judge", sid, prompt, 500, True)
     return {"session_id": sid, "ending_check": result["json"], "usage": result}
 
 

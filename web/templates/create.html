@@ -18,10 +18,12 @@
 
 <div id="step_outline" style="display:none">
 <h2>第一级 · 立意确认</h2>
-<div class="panel" id="options"></div>
+<div class="panel" id="options"><p class="meta">点「生成候选」。</p></div>
 <div class="panel">
-  <label>已选方向（可编辑）<textarea id="chosen_json" rows="5"></textarea></label>
-  <button class="btn" onclick="doBeats()">生成拍子表</button>
+  <label>已选方向（可编辑 JSON——候选生成后自动填入；模型抽风时也可照此格式手写）
+    <textarea id="chosen_json" rows="6" placeholder='{"title":"方向名","angle":"题材角度","action":"立意动作（引 thought 条目）","stance":"价值姿态"}'></textarea></label>
+  <button class="btn ghost" onclick="doOutline()">重新生成候选</button>
+  <button class="btn" onclick="lockChosen()">锁定此立意 → 生成拍子表</button>
 </div>
 </div>
 
@@ -88,11 +90,12 @@ async function doOutline() {
     const rec = d.recommended || 0;
     $('options').innerHTML = (d.options || []).map((o, i) =>
       `<label style="display:block;margin:6px 0"><input type="radio" name="opt" value="${i}" ${i === rec ? 'checked' : ''} onchange="pickOption(${i})">
-       <strong>${o.title}</strong>｜${o.angle}<br><span class="meta">动作：${o.action}｜姿态：${o.stance}</span></label>`).join('')
-      + '<div class="panel"><label>已选方向（可编辑 JSON）<textarea id="chosen_json" rows="5"></textarea></label>'
-      + '<button class="btn" onclick="lockChosen()">锁定此立意</button></div>';
+       <strong>${o.title}</strong>｜${o.angle}<br><span class="meta">动作：${o.action}｜姿态：${o.stance}</span></label>`).join('');
     pickOption(rec);
-  } catch (e) { $('options').innerHTML = `<p style="color:var(--bad)">${e.message}</p>`; }
+  } catch (e) {
+    $('options').innerHTML = `<p style="color:var(--bad)">${e.message}</p>
+      <p class="meta">可在下方"已选方向"里照格式手写（或修好截断的 JSON）后直接锁定；也可点"重新生成候选"重试。</p>`;
+  }
 }
 function pickOption(i) {
   if (S.lastOptions && S.lastOptions.options[i])
@@ -111,7 +114,10 @@ async function doBeats() {
       chosen: S.chosen, session_id: S.session_id });
     S.session_id = d.session_id; S.beats = d.beats || [];
     renderBeats(d.tone_note || '不指定', d.canon_anchor || '无');
-  } catch (e) { $('beats').innerHTML = `<p style="color:var(--bad)">${e.message}</p>`; }
+  } catch (e) {
+    $('beats').innerHTML = `<p style="color:var(--bad)">${e.message}</p>
+      <button class="btn ghost" onclick="doBeats()">重试</button>`;
+  }
 }
 function renderBeats(tone, anchor) {
   $('beats').innerHTML = S.beats.map(b =>

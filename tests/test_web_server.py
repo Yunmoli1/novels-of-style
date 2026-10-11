@@ -242,6 +242,26 @@ class TestWebServer(unittest.TestCase):
         cfg["routing"]["write"] = {"provider": "mock", "model": "mock-write"}
         appstate.save_config(cfg, self.cfg_path)
 
+    def test_extract_json_truncated_repair(self):
+        """真实场景回归：立意 2–3 项 JSON 被 max_tokens 截断——修复应救回完整项。"""
+        import creation
+        good = json.dumps({"options": [
+            {"title": "甲", "angle": "角度甲", "action": "立意动作 1",
+             "stance": "克制"},
+            {"title": "乙", "angle": "角度乙", "action": "立意动作 2",
+             "stance": "自省"}], "recommended": 0}, ensure_ascii=False)
+        cut = good[:good.index("角度乙") + 3]  # 截断在第二项中间
+        fixed = creation.extract_json(cut)
+        self.assertEqual(fixed["options"][0]["title"], "甲")
+        self.assertEqual(len(fixed["options"]), 2)
+        # 尾部悬空逗号 + 截断
+        cut2 = good[:good.index('"stance": "自省"')] + '"stance": "自省",'
+        fixed2 = creation.extract_json(cut2)
+        self.assertEqual(fixed2["options"][1]["stance"], "自省")
+        # 围栏 + 完整 JSON 原样可用
+        fenced = "```json" + chr(10) + good + chr(10) + "```"
+        self.assertEqual(creation.extract_json(fenced), json.loads(good))
+
     def test_localhost_binding_source(self):
         src = (S / "web" / "launch.py").read_text(encoding="utf-8")
         self.assertIn('host="127.0.0.1"', src)
