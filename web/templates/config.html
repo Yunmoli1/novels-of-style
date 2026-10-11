@@ -50,7 +50,10 @@ function renderProviders() {
 }
 function renderRouting() {
   const routes = [['write', '写作模型'], ['judge', '判官模型（建议异源）'], ['critique', '批改模型']];
-  document.getElementById('routing').innerHTML = routes.map(([k, label]) => {
+  const hasModels = (cfg.providers || []).some(p => (p.models || []).length);
+  const hint = hasModels ? '' :
+    '<p class="meta">⚠ 供应商还没有模型列表——点上方供应商卡片里的「测试连接」自动获取（或手动填"模型 ID"后点"添加 / 更新供应商"）。</p>';
+  document.getElementById('routing').innerHTML = hint + routes.map(([k, label]) => {
     const cur = (cfg.routing || {})[k] || {};
     const opts = (cfg.providers || []).map(p =>
       (p.models || []).map(m => {
@@ -68,19 +71,25 @@ async function addProvider() {
     api_key: document.getElementById('p_key').value,   // 留空则后端保留旧 key
     models: document.getElementById('p_models').value.split('\n').map(s => s.trim()).filter(Boolean) });
   cfg.providers = providers;
-  await saveAll(true); renderProviders();
+  await saveAll(true); renderProviders(); renderRouting();
 }
 function delP(i) { cfg.providers.splice(i, 1); renderProviders(); renderRouting(); }
 async function testP(name) {
   document.getElementById('test_out').textContent = '测试中……';
   const r = await (await fetch('/app/api/config/test', { method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) })).json();
-  document.getElementById('test_out').textContent = r.ok
-    ? `连接 ✓（${(r.models || []).length} 个模型：${(r.models || []).slice(0, 5).join('、')}）`
-    : `失败：${r.error}`;
-  if (r.ok && r.models.length) {
-    const p = cfg.providers.find(p => p.name === name);
-    if (!(p.models || []).length) { p.models = r.models; renderProviders(); }
+  if (!r.ok) {
+    document.getElementById('test_out').textContent = `失败：${r.error}`;
+    return;
+  }
+  document.getElementById('test_out').textContent =
+    `连接 ✓，获取到 ${r.models.length} 个模型：${r.models.slice(0, 6).join('、')}` +
+    (r.models.length > 6 ? ' …' : '');
+  const p = cfg.providers.find(p => p.name === name);
+  if (p && r.models.length) {
+    p.models = r.models;          // 以端点返回为准，自动落库
+    await saveAll(true);
+    renderProviders(); renderRouting();
   }
 }
 async function saveAll(silent) {

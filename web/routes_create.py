@@ -117,7 +117,19 @@ def get_config():
 @router.post("/config")
 def set_config(body: ConfigIn):
     cfg = appstate.load_config()
-    cfg["providers"] = [p for p in body.providers if p.get("name") and p.get("base_url")]
+    old_by_name = {p.get("name"): p for p in cfg.get("providers", [])
+                   if isinstance(p, dict)}
+    merged = []
+    for p in body.providers:
+        if not (p.get("name") and p.get("base_url")):
+            continue
+        key = (p.get("api_key") or "").strip()
+        if not key and p["name"] in old_by_name:
+            key = (old_by_name[p["name"]].get("api_key") or "").strip()
+        merged.append({"name": p["name"], "base_url": p["base_url"],
+                       "api_key": key,
+                       "models": p.get("models") if isinstance(p.get("models"), list) else []})
+    cfg["providers"] = merged
     for p in cfg["providers"]:
         if not isinstance(p.get("models"), list):
             p["models"] = []

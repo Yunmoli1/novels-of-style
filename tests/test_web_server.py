@@ -115,6 +115,18 @@ class TestWebServer(unittest.TestCase):
         self.assertTrue(view["providers"][0]["has_key"])
         self.assertNotIn("api_key", view["providers"][0])
 
+    def test_empty_key_preserves_stored_key(self):
+        """回归锁：saveAll 回传的是脱敏视图（无 api_key）——服务端必须与同名
+        供应商合并 key（UI 承诺"留空 = 保持已存 key 不变"），否则每次保存洗 key。"""
+        base = {"name": "mock", "base_url": f"http://127.0.0.1:{self.mock_port}/v1",
+                "models": ["mock-write"]}  # 无 api_key 字段
+        r = self.client.post("/app/api/config", json={
+            "providers": [base], "routing": {}})
+        self.assertEqual(r.status_code, 200)
+        stored = appstate.load_config(self.cfg_path)
+        self.assertEqual(stored["providers"][0].get("api_key"), MOCK_KEY,
+                         "空 key 提交把已存 key 洗掉了")
+
     def test_config_gitignored(self):
         gi = (S / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("web/config.local.json", gi)
