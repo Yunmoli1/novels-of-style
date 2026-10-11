@@ -120,7 +120,11 @@ def get_config():
 def set_config(body: ConfigIn):
     cfg = appstate.load_config()
     cur_rev = int(cfg.get("rev", 0))
-    if body.rev is not None and body.rev != cur_rev:
+    if body.rev is None:
+        return JSONResponse(status_code=400, content={
+            "detail": "缺少 rev（配置版本号）——请刷新页面后重试；"
+                      "不带 rev 的写入已禁止（防陈旧页面静默覆盖配置）"})
+    if body.rev != cur_rev:
         return JSONResponse(status_code=409, content={
             "detail": f"配置已被其他窗口/操作更新（本页 rev={body.rev}，最新 rev={cur_rev}）",
             "config": appstate.sanitize_config(cfg), "rev": cur_rev})

@@ -125,22 +125,28 @@ class TestWebServer(unittest.TestCase):
             "providers": d["providers"], "routing": {}, "rev": stale})
         self.assertEqual(r.status_code, 409)
         self.assertIn("rev", r.json()["config"])
-        # 不带 rev 的调用（旧客户端/脚本）保持兼容——发脱敏视图（无 key），
-        # 顺带验证 key 合并：无 rev 兼容路径也不得洗 key
+        # 不带 rev 的写入一律 400（v0.6.0 第三次翻转的根因：旧页面无 rev
+        # 仍被兼容接受——兼容路即覆盖之门，故必须硬拒）
         r2 = self.client.post("/app/api/config", json={
             "providers": d["providers"], "routing": d["routing"]})
-        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.status_code, 400)
+        self.assertIn("rev", r2.json()["detail"])
+        # 带当前 rev 的正常保存照常工作，且 key 合并不洗 key
+        r3 = self.client.post("/app/api/config", json={
+            "providers": d["providers"], "routing": d["routing"], "rev": d["rev"]})
+        self.assertEqual(r3.status_code, 200)
         stored = appstate.load_config(self.cfg_path)
         self.assertEqual(stored["providers"][0].get("api_key"), MOCK_KEY,
-                         "无 rev 兼容路径把 key 洗掉了")
+                         "正常保存把 key 洗掉了")
 
     def test_empty_key_preserves_stored_key(self):
         """回归锁：saveAll 回传的是脱敏视图（无 api_key）——服务端必须与同名
         供应商合并 key（UI 承诺"留空 = 保持已存 key 不变"），否则每次保存洗 key。"""
         base = {"name": "mock", "base_url": f"http://127.0.0.1:{self.mock_port}/v1",
                 "models": ["mock-write"]}  # 无 api_key 字段
+        rev = self.client.get("/app/api/config").json()["rev"]
         r = self.client.post("/app/api/config", json={
-            "providers": [base], "routing": {}})
+            "providers": [base], "routing": {}, "rev": rev})
         self.assertEqual(r.status_code, 200)
         stored = appstate.load_config(self.cfg_path)
         self.assertEqual(stored["providers"][0].get("api_key"), MOCK_KEY,
