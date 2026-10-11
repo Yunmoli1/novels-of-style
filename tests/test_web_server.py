@@ -130,6 +130,25 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("测试项目", names)
         self.assertIn("luxun", [p["name"] for p in r.json()["packs"]])
 
+    def test_projects_endpoint_without_local_tier(self):
+        """CI 回归锁：CI 无 stylepacks/local/（gitignore），/projects 不得炸——
+        v0.6.0 曾因本地有 local 目录掩盖了 iterdir 存在性 bug 而双平台红。"""
+        import routes_create
+        original = routes_create.STYLEPACKS
+        sp = Path(self.tmp.name) / "sp"
+        (sp / "fakepack").mkdir(parents=True)
+        (sp / "fakepack" / "pack.json").write_text("{}", encoding="utf-8")
+        try:
+            routes_create.STYLEPACKS = sp  # 有包、无 local/
+            r = self.client.get("/app/api/projects")
+            self.assertEqual(r.status_code, 200)
+            names = [p["name"] for p in r.json()["packs"]]
+            self.assertIn("fakepack", names)
+            self.assertFalse(any(n.startswith("local/") for n in names),
+                             "无 local 层时不得出现 local/ 条目")
+        finally:
+            routes_create.STYLEPACKS = original
+
     def test_project_traversal_blocked(self):
         r = self.client.post("/app/api/assemble", json={
             "project": "../stylepacks", "pack": "luxun",

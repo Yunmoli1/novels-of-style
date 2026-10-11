@@ -159,10 +159,10 @@ def projects():
             "packs": [{"name": d.name} for d in sorted(STYLEPACKS.iterdir())
                       if d.is_dir() and (d / "pack.json").is_file()
                       and d.name != "local"]
-            + [{"name": f"local/{d.name}"}
-               for d in sorted((STYLEPACKS / "local").iterdir())
-               if (STYLEPACKS / "local").is_dir() and d.is_dir()
-               and (d / "pack.json").is_file()]}
+            + ([{"name": f"local/{d.name}"}
+                for d in sorted(local_dir.iterdir())
+                if d.is_dir() and (d / "pack.json").is_file()]
+               if (local_dir := STYLEPACKS / "local").is_dir() else [])}
 
 
 class AssembleIn(BaseModel):

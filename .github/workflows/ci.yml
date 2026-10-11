@@ -18,32 +18,7 @@ jobs:
       - name: 安装工作台依赖（web/ 隔离，引擎层保持零依赖）
         run: pip install -r web/requirements-web.txt
       - name: 脚本自测（unittest）
-        shell: bash
-        run: |
-          set -o pipefail
-          python -m unittest discover -s tests -v 2>&1 | tee unittest.log
-      - name: 失败详情回传（commit comment，诊断用阅后即焚）
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          tail -c 3000 unittest.log > ut_tail.txt || true
-          python - <<'PY'
-          import json, os, urllib.request
-          token = os.environ["GH_TOKEN"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          sha = os.environ["GITHUB_SHA"]
-          body = open("ut_tail.txt", encoding="utf-8", errors="replace").read()
-          data = json.dumps({"body": "CI 诊断（自动回传，阅后即焚）：\n```\n" + body + "\n```"}).encode()
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/{repo}/commits/{sha}/comments",
-              data=data, method="POST",
-              headers={"Authorization": f"Bearer {token}",
-                       "Accept": "application/vnd.github+json"})
-          urllib.request.urlopen(req)
-          print("已回传失败日志到 commit comment")
-          PY
+        run: python -m unittest discover -s tests -v
       - name: 校验自带风格包（自包含性）
         run: |
           python scripts/validate_pack.py stylepacks/luxun
@@ -65,32 +40,7 @@ jobs:
       - name: 安装工作台依赖（web/ 隔离，引擎层保持零依赖）
         run: pip install -r web/requirements-web.txt
       - name: 脚本自测（unittest，GBK 管道）
-        shell: bash
-        run: |
-          set -o pipefail
-          PYTHONIOENCODING=cp936 python -m unittest discover -s tests -v 2>&1 | tee unittest.log
-      - name: 失败详情回传（commit comment，诊断用阅后即焚）
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          tail -c 3000 unittest.log > ut_tail.txt || true
-          python - <<'PY'
-          import json, os, urllib.request
-          token = os.environ["GH_TOKEN"]
-          repo = os.environ["GITHUB_REPOSITORY"]
-          sha = os.environ["GITHUB_SHA"]
-          body = open("ut_tail.txt", encoding="utf-8", errors="replace").read()
-          data = json.dumps({"body": "CI 诊断（自动回传，阅后即焚）：\n```\n" + body + "\n```"}).encode()
-          req = urllib.request.Request(
-              f"https://api.github.com/repos/{repo}/commits/{sha}/comments",
-              data=data, method="POST",
-              headers={"Authorization": f"Bearer {token}",
-                       "Accept": "application/vnd.github+json"})
-          urllib.request.urlopen(req)
-          print("已回传失败日志到 commit comment")
-          PY
+        run: python -m unittest discover -s tests -v
       - name: GBK 下校验与导出冒烟（镜像 ubuntu job）
         run: |
           python scripts/validate_pack.py stylepacks/luxun
