@@ -102,9 +102,16 @@ async function saveAll(silent) {
   const body = { providers: cfg.providers, routing,
     workspace_root: g('ws_root'), context_budget_tokens: +g('budget') || 24000,
     session_max_tokens: +g('maxtok') || null,
-    prose_max_tokens: +g('prosetok') || 3500, temperature: +g('temp') || 0.8 };
-  const r = await (await fetch('/app/api/config', { method: 'POST',
-    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })).json();
+    prose_max_tokens: +g('prosetok') || 3500, temperature: +g('temp') || 0.8,
+    rev: cfg.rev ?? null };
+  const resp = await fetch('/app/api/config', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  if (resp.status === 409) {
+    alert('配置刚被其他窗口/操作更新过——本页是旧版本，已为你刷新到最新配置。');
+    location.reload();
+    return;
+  }
+  const r = await resp.json();
   cfg = r.config;
   if (!silent) document.getElementById('save_out').textContent = '已保存 ✓';
 }

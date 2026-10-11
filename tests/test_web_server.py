@@ -115,6 +115,25 @@ class TestWebServer(unittest.TestCase):
         self.assertTrue(view["providers"][0]["has_key"])
         self.assertNotIn("api_key", view["providers"][0])
 
+    def test_config_stale_rev_rejected(self):
+        """乐观锁回归：陈旧页面（旧 rev）提交不得静默覆盖新配置——
+        v0.6.0 实测危害：调试方改完路由，用户陈旧页面一次保存就覆盖回去。"""
+        d = self.client.get("/app/api/config").json()
+        self.assertIn("rev", d, "GET 配置必须带 rev")
+        stale = d["rev"] - 1
+        r = self.client.post("/app/api/config", json={
+            "providers": d["providers"], "routing": {}, "rev": stale})
+        self.assertEqual(r.status_code, 409)
+        self.assertIn("rev", r.json()["config"])
+        # 不带 rev 的调用（旧客户端/脚本）保持兼容——发脱敏视图（无 key），
+        # 顺带验证 key 合并：无 rev 兼容路径也不得洗 key
+        r2 = self.client.post("/app/api/config", json={
+            "providers": d["providers"], "routing": d["routing"]})
+        self.assertEqual(r2.status_code, 200)
+        stored = appstate.load_config(self.cfg_path)
+        self.assertEqual(stored["providers"][0].get("api_key"), MOCK_KEY,
+                         "无 rev 兼容路径把 key 洗掉了")
+
     def test_empty_key_preserves_stored_key(self):
         """回归锁：saveAll 回传的是脱敏视图（无 api_key）——服务端必须与同名
         供应商合并 key（UI 承诺"留空 = 保持已存 key 不变"），否则每次保存洗 key。"""

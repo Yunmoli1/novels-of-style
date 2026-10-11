@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = ROOT / "web" / "config.local.json"
 
 DEFAULT_CONFIG = {
+    "rev": 0,                  # 乐观锁版本号：每次保存 +1（防陈旧页面静默覆盖）
     "providers": [],           # [{name, base_url, api_key, models: [id,...]}]
     "routing": {"write": None, "judge": None, "critique": None},
     # routing 条目 = {"provider": <name>, "model": <id>}

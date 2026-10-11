@@ -20,6 +20,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import appstate
@@ -104,6 +105,7 @@ class ConfigIn(BaseModel):
     session_max_tokens: int | None = 200000
     prose_max_tokens: int = 3500
     temperature: float = 0.8
+    rev: int | None = None  # 乐观锁：陈旧页面提交旧 rev → 409（防静默覆盖）
 
 
 @router.get("/config")
@@ -117,6 +119,11 @@ def get_config():
 @router.post("/config")
 def set_config(body: ConfigIn):
     cfg = appstate.load_config()
+    cur_rev = int(cfg.get("rev", 0))
+    if body.rev is not None and body.rev != cur_rev:
+        return JSONResponse(status_code=409, content={
+            "detail": f"配置已被其他窗口/操作更新（本页 rev={body.rev}，最新 rev={cur_rev}）",
+            "config": appstate.sanitize_config(cfg), "rev": cur_rev})
     old_by_name = {p.get("name"): p for p in cfg.get("providers", [])
                    if isinstance(p, dict)}
     merged = []
@@ -140,6 +147,7 @@ def set_config(body: ConfigIn):
     cfg["session_max_tokens"] = body.session_max_tokens
     cfg["prose_max_tokens"] = body.prose_max_tokens
     cfg["temperature"] = body.temperature
+    cfg["rev"] = cur_rev + 1
     appstate.save_config(cfg)
     return {"ok": True, "config": appstate.sanitize_config(appstate.load_config())}
 
