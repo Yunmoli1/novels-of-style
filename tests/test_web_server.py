@@ -8,14 +8,16 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from fastapi.testclient import TestClient
-
-S = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(S / "web"))
-sys.path.insert(0, str(S / "scripts"))
-
-import appstate  # noqa: E402
-from server import create_app  # noqa: E402
+try:
+    from fastapi.testclient import TestClient  # noqa
+    S = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(S / "web"))
+    sys.path.insert(0, str(S / "scripts"))
+    import appstate  # noqa: E402
+    from server import create_app  # noqa: E402
+    _HAS_DEPS = True
+except ImportError:
+    _HAS_DEPS = False
 
 MOCK_KEY = "sk-mock-1234567890"
 
@@ -71,6 +73,7 @@ class MockHandler(BaseHTTPRequestHandler):
                     "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
 
 
+@unittest.skipUnless(_HAS_DEPS, "web 依赖未安装（pip install -r web/requirements-web.txt）")
 class TestWebServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
