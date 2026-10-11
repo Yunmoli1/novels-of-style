@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}模型配置{% endblock %}
+{% block main %}
+<h1>模型配置</h1>
+<p class="meta">key 只存服务端 web/config.local.json（gitignore），页面永不回显；判官建议绑异源供应商（缓解判官同源偏差）。</p>
+
+<h2>供应商</h2>
+<div id="providers"></div>
+<div class="panel">
+  <label>名称 <input id="p_name" placeholder="如 openai / deepseek / 本地 ollama"></label>
+  <label>Base URL <input id="p_url" placeholder="https://api.xxx.com/v1"></label>
+  <label>API Key <input id="p_key" type="password" placeholder="留空 = 保持已存 key 不变"></label>
+  <label>模型 ID（每行一个）<textarea id="p_models" rows="3" placeholder="gpt-4o&#10;deepseek-chat"></textarea></label>
+  <button class="btn" onclick="addProvider()">添加 / 更新供应商</button>
+  <span id="test_out" class="meta"></span>
+</div>
+
+<h2>按模块路由</h2>
+<div class="panel" id="routing"></div>
+
+<h2>生成与护栏</h2>
+<div class="panel">
+  <label>工作区根 <input id="ws_root" style="width:420px"></label><br>
+  <label>上下文预算（token） <input id="budget" type="number" style="width:110px"></label>
+  <label>单会话 token 上限 <input id="maxtok" type="number" style="width:130px"></label>
+  <label>正文 max_tokens <input id="prosetok" type="number" style="width:110px"></label>
+  <label>temperature <input id="temp" type="number" step="0.05" style="width:80px"></label>
+</div>
+<button class="btn" onclick="saveAll()">保存全部</button>
+<span id="save_out" class="meta"></span>
+
+<script>
+let cfg = {};
+async function load() {
+  cfg = await (await fetch('/app/api/config')).json();
+  document.getElementById('ws_root').value = cfg.workspace_root || '';
+  document.getElementById('budget').value = cfg.context_budget_tokens || 24000;
+  document.getElementById('maxtok').value = cfg.session_max_tokens || '';
+  document.getElementById('prosetok').value = cfg.prose_max_tokens || 3500;
+  document.getElementById('temp').value = cfg.temperature ?? 0.8;
+  renderProviders(); renderRouting();
+}
+function renderProviders() {
+  const el = document.getElementById('providers');
+  el.innerHTML = (cfg.providers || []).map((p, i) =>
+    `<div class="panel"><strong>${p.name}</strong> · ${p.base_url} · key：${p.has_key ? '已存 ✓' : '未设'}<br>
+     模型：${(p.models || []).join('、') || '（未列）'}<br>
+     <button class="btn ghost" onclick="testP('${p.name}')">测试连接</button>
+     <button class="btn ghost" onclick="delP(${i})">删除</button></div>`).join('') || '<p class="meta">（尚未配置供应商）</p>';
+}
+function renderRouting() {
+  const routes = [['write', '写作模型'], ['judge', '判官模型（建议异源）'], ['critique', '批改模型']];
+  document.getElementById('routing').innerHTML = routes.map(([k, label]) => {
+    const cur = (cfg.routing || {})[k] || {};
+    const opts = (cfg.providers || []).map(p =>
+      (p.models || []).map(m => {
+        const sel = cur.provider === p.name && cur.model === m ? 'selected' : '';
+        return `<option value="${p.name}||${m}" ${sel}>${p.name} / ${m}</option>`;
+      }).join('')).join('');
+    return `<div class="panel">${label}：<select id="route_${k}"><option value="">（未设置）</option>${opts}</select></div>`;
+  }).join('');
+}
+async function addProvider() {
+  const name = document.getElementById('p_name').value.trim();
+  if (!name) return alert('需要名称');
+  const providers = (cfg.providers || []).filter(p => p.name !== name);
+  providers.push({ name, base_url: document.getElementById('p_url').value.trim(),
+    api_key: document.getElementById('p_key').value,   // 留空则后端保留旧 key
+    models: document.getElementById('p_models').value.split('\n').map(s => s.trim()).filter(Boolean) });
+  cfg.providers = providers;
+  await saveAll(true); renderProviders();
+}
+function delP(i) { cfg.providers.splice(i, 1); renderProviders(); renderRouting(); }
+async function testP(name) {
+  document.getElementById('test_out').textContent = '测试中……';
+  const r = await (await fetch('/app/api/config/test', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name }) })).json();
+  document.getElementById('test_out').textContent = r.ok
+    ? `连接 ✓（${(r.models || []).length} 个模型：${(r.models || []).slice(0, 5).join('、')}）`
+    : `失败：${r.error}`;
+  if (r.ok && r.models.length) {
+    const p = cfg.providers.find(p => p.name === name);
+    if (!(p.models || []).length) { p.models = r.models; renderProviders(); }
+  }
+}
+async function saveAll(silent) {
+  const g = id => document.getElementById(id).value;
+  const routing = {};
+  for (const k of ['write', 'judge', 'critique']) {
+    const v = document.getElementById('route_' + k).value;
+    if (v) { const [provider, model] = v.split('||'); routing[k] = { provider, model }; }
+  }
+  const body = { providers: cfg.providers, routing,
+    workspace_root: g('ws_root'), context_budget_tokens: +g('budget') || 24000,
+    session_max_tokens: +g('maxtok') || null,
+    prose_max_tokens: +g('prosetok') || 3500, temperature: +g('temp') || 0.8 };
+  const r = await (await fetch('/app/api/config', { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })).json();
+  cfg = r.config;
+  if (!silent) document.getElementById('save_out').textContent = '已保存 ✓';
+}
+load();
+</script>
+{% endblock %}

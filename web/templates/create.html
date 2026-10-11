@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}创作{% endblock %}
+{% block main %}
+<h1>创作 · 正文环</h1>
+<p class="meta">状态机：装配预览 → 立意确认 → 拍子表 → 生成 → 三道门 → 确认交付。fp_check/borrow_check 是 advisory 报告不是门；收尾检查为思想层硬性条目，交付前必看。</p>
+
+<div class="panel">
+  <label>项目 <select id="project"></select></label>
+  <label>风格包 <select id="pack"></select></label>
+  <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
+  <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
+  <label>关键词（顿号分隔）<input id="keywords" style="width:240px" placeholder="人物/物件/本章涉及"></label>
+  <label>稿数 <select id="n_drafts"><option>1</option><option>2</option><option>3</option></select></label>
+  <button class="btn" onclick="doAssemble()">装配预览</button>
+</div>
+
+<div id="assembly" class="panel" style="display:none"></div>
+
+<div id="step_outline" style="display:none">
+<h2>第一级 · 立意确认</h2>
+<div class="panel" id="options"></div>
+<div class="panel">
+  <label>已选方向（可编辑）<textarea id="chosen_json" rows="5"></textarea></label>
+  <button class="btn" onclick="doBeats()">生成拍子表</button>
+</div>
+</div>
+
+<div id="step_beats" style="display:none">
+<h2>第二级 · 拍子表</h2>
+<div class="panel" id="beats"></div>
+<div class="panel">
+  <label>调子声明 <input id="tone_note" style="width:260px"></label>
+  <label>原作锚点 <input id="canon_anchor" style="width:320px"></label>
+  <button class="btn" onclick="doGenerate()">生成正文</button>
+  <span id="gen_out" class="meta"></span>
+</div>
+</div>
+
+<div id="step_drafts" style="display:none">
+<h2>草稿与三道门</h2>
+<div id="drafts"></div>
+<div class="panel">
+  <label>采用稿 <select id="pick"></select></label>
+  <button class="btn" onclick="doSave()">确认交付（落盘 manuscript + sessions）</button>
+  <span id="save_out" class="meta"></span>
+</div>
+</div>
+
+<script>
+const S = { assembly: null, session_id: '', chosen: null, beats: [], drafts: [], lastOptions: null };
+const $ = id => document.getElementById(id);
+async function post(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.detail || JSON.stringify(d));
+  return d;
+}
+async function init() {
+  const d = await (await fetch('/app/api/projects')).json();
+  $('project').innerHTML = d.projects.map(p => `<option value="${p.name}">${p.name}${p.pinned ? '（钉扎：' + p.pinned.pack + ' v' + p.pinned.version + '）' : ''}</option>`).join('');
+  $('pack').innerHTML = d.packs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+}
+function keywords() { return $('keywords').value.split(/[、,，]/).map(s => s.trim()).filter(Boolean); }
+async function doAssemble() {
+  S.req = { project: $('project').value, pack: $('pack').value,
+    chapter_no: +$('chapter_no').value, keywords: keywords() };
+  S.assembly = await post('/app/api/assemble', S.req);
+  const rows = S.assembly.items.map(i =>
+    `<tr${i.dropped ? ' style="opacity:.4"' : ''}><td>${i.kind}</td><td>${i.source}</td>
+     <td>${i.chars}</td><td>${i.est_tokens}${i.dropped ? '（预算裁掉）' : ''}</td>
+     <td style="max-width:340px">${i.excerpt.replace(/</g, '&lt;')}</td></tr>`).join('');
+  $('assembly').style.display = '';
+  $('assembly').innerHTML = `<h3>装配预览（所见即所发）</h3>
+    <table><thead><tr><th>类型</th><th>来源</th><th>字数</th><th>token 估算</th><th>摘录</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <p class="meta">合计 ${S.assembly.total_chars} 字 ≈ ${S.assembly.total_est_tokens} token / 预算 ${S.assembly.budget_tokens}
+    ${S.assembly.within_budget ? '✓ 预算内' : '⚠ 超预算（记忆项已裁）'}</p>`;
+  $('step_outline').style.display = '';
+  $('options').innerHTML = '<p class="meta">点「生成候选」让写作模型按 thought.md 立意动作提 2–3 个方向。</p><button class="btn" onclick="doOutline()">生成候选</button>';
+}
+async function doOutline() {
+  $('options').innerHTML = '<p class="meta">模型生成中……</p>';
+  try {
+    const d = await post('/app/api/outline', {...S.req, title: $('title').value,
+      user_notes: '', session_id: S.session_id });
+    S.session_id = d.session_id; S.lastOptions = d;
+    const rec = d.recommended || 0;
+    $('options').innerHTML = (d.options || []).map((o, i) =>
+      `<label style="display:block;margin:6px 0"><input type="radio" name="opt" value="${i}" ${i === rec ? 'checked' : ''} onchange="pickOption(${i})">
+       <strong>${o.title}</strong>｜${o.angle}<br><span class="meta">动作：${o.action}｜姿态：${o.stance}</span></label>`).join('')
+      + '<div class="panel"><label>已选方向（可编辑 JSON）<textarea id="chosen_json" rows="5"></textarea></label>'
+      + '<button class="btn" onclick="lockChosen()">锁定此立意</button></div>';
+    pickOption(rec);
+  } catch (e) { $('options').innerHTML = `<p style="color:var(--bad)">${e.message}</p>`; }
+}
+function pickOption(i) {
+  if (S.lastOptions && S.lastOptions.options[i])
+    $('chosen_json').value = JSON.stringify(S.lastOptions.options[i], null, 2);
+}
+function lockChosen() {
+  try { S.chosen = JSON.parse($('chosen_json').value); }
+  catch (e) { return alert('已选方向不是合法 JSON'); }
+  $('step_beats').style.display = '';
+  $('beats').innerHTML = '<p class="meta">点「生成拍子表」。</p><button class="btn" onclick="doBeats()">生成拍子表</button>';
+}
+async function doBeats() {
+  $('beats').innerHTML = '<p class="meta">模型生成中……</p>';
+  try {
+    const d = await post('/app/api/beats', {...S.req, title: $('title').value,
+      chosen: S.chosen, session_id: S.session_id });
+    S.session_id = d.session_id; S.beats = d.beats || [];
+    renderBeats(d.tone_note || '不指定', d.canon_anchor || '无');
+  } catch (e) { $('beats').innerHTML = `<p style="color:var(--bad)">${e.message}</p>`; }
+}
+function renderBeats(tone, anchor) {
+  $('beats').innerHTML = S.beats.map(b =>
+    `<div class="panel"><strong>拍${b.no}</strong>
+     <textarea rows="2" style="margin-top:6px;width:100%" oninput="S.beats[${b.no - 1}].beat = this.value">${(b.beat || '').replace(/</g, '&lt;')}</textarea>
+     <button class="btn ghost" onclick="reroll(${b.no})">重掷此拍</button></div>`).join('');
+  $('tone_note').value = tone; $('canon_anchor').value = anchor;
+  $('step_drafts').style.display = '';
+}
+async function reroll(no) {
+  try {
+    const d = await post('/app/api/reroll_beat', {...S.req, title: $('title').value,
+      chosen: S.chosen, beats: S.beats, index: no, session_id: S.session_id });
+    S.beats[no - 1] = d.beat; renderBeats($('tone_note').value, $('canon_anchor').value);
+  } catch (e) { alert(e.message); }
+}
+async function doGenerate() {
+  $('gen_out').textContent = '生成中（多稿串行，勿关页）……';
+  try {
+    const d = await post('/app/api/generate', {...S.req, title: $('title').value,
+      chosen: S.chosen, beats: S.beats, tone_note: $('tone_note').value,
+      canon_anchor: $('canon_anchor').value,
+      n_drafts: +$('n_drafts').value, session_id: S.session_id });
+    S.session_id = d.session_id; S.drafts = d.drafts;
+    $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
+    renderDrafts();
+  } catch (e) { $('gen_out').textContent = '失败：' + e.message; }
+}
+function renderDrafts() {
+  $('drafts').innerHTML = S.drafts.map((dr, i) => {
+    const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
+    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）
+      <div class="passage" style="max-height:340px;overflow:auto">${dr.text.replace(/</g, '&lt;')}</div>
+      <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
+      <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
+      <span id="end_${i}" class="meta"></span></div>`;
+  }).join('');
+  $('pick').innerHTML = S.drafts.map((_, i) => `<option value="${i}">稿 ${i + 1}</option>`).join('');
+}
+async function endingCheck(i) {
+  $('end_' + i).textContent = '判官检查中……';
+  try {
+    const d = await post('/app/api/ending_check', { project: $('project').value,
+      title: $('title').value, text: S.drafts[i].text, session_id: S.session_id });
+    const v = d.ending_check;
+    S.drafts[i].ending = v;
+    $('end_' + i).innerHTML = v.violation
+      ? `<span style="color:var(--bad)">⚠ ${v.reason}——按纪律应重写收尾再交付</span>`
+      : `<span style="color:var(--good)">✓ ${v.reason}</span>`;
+  } catch (e) { $('end_' + i).textContent = '失败：' + e.message; }
+}
+async function doSave() {
+  const i = +$('pick').value;
+  const d = await post('/app/api/save', {...S.req, title: $('title').value,
+    text: S.drafts[i].text, chosen: S.chosen || {}, beats: S.beats,
+    tone_note: $('tone_note').value, canon_anchor: $('canon_anchor').value,
+    checks: { fp_check: S.drafts[i].fp_check, borrow_check: S.drafts[i].borrow_check,
+              ending: S.drafts[i].ending || null },
+    usage: S.drafts[i].usage, session_id: S.session_id });
+  $('save_out').innerHTML = `已交付 ✓ ${d.manuscript}｜会话已存 sessions/（可复判）`;
+}
+init();
+</script>
+{% endblock %}

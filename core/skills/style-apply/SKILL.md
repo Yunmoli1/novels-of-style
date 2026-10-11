@@ -21,7 +21,7 @@ description: 按项目钉扎的风格包写作、续写或改写：执行章节�
    + `canon/pinned-canon.md` 的精华卡与本章涉及的事实 / 人物条目必载；
    must 术语按阈值落实，ban 词绝对不出现，OOC 对照以 canon 人物卡优先
 
-叙事类作品同时读取 `packs/narrative/REFERENCE.md` 的结构指导
+叙事类作品同时读取 `docs/references/narrative.md` 的结构指导
 （单章结构、钩子、爽点节奏——REFERENCE 管"结构写什么"，风格包管"句子怎么写"）。
 
 **加载纪律（硬性）**：上述文件放在**同一轮并行工具调用**中一次读齐，

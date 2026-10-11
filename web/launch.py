@@ -1,11 +1,16 @@
 # -*- coding: utf-8 -*-
-"""launch：工作台入口——双击即可运行，不需要手动命令行（r4 阶段 0，用户追加要求）。
+"""launch：工作台入口——双击即可运行，不需要手动命令行。
 
 用法：
-    python web/launch.py [--port N] [--no-build] [--no-open] [--build-only]
+    python web/launch.py [--port N] [--site DIR] [--no-build] [--no-open]
+                         [--build-only] [--static-only]
 
-行为：构建/复用站点 → http.server 绑 127.0.0.1（红线 1，永不绑 0.0.0.0）→
-自动打开默认浏览器 → Ctrl+C 退出。Windows 下双击仓库根的 启动工作台.bat 即可。
+行为：
+- 首次运行自动安装 Web 依赖（fastapi/uvicorn/httpx/jinja2，requirements-web.txt）
+- 构建/复用站点 → 默认**全模式**：FastAPI（/app 配置与创作环）+ 静态站点同源
+  挂载，仅绑 127.0.0.1（红线 1），自动打开浏览器 → Ctrl+C 退出
+- --static-only：退回阶段 0 纯静态服务（无 /app，依赖缺失时的兜底）
+- Windows 下双击仓库根的 启动工作台.bat 即可
 """
 from __future__ import annotations
 
@@ -13,16 +18,24 @@ import argparse
 import functools
 import http.server
 import socket
+import subprocess
 import sys
 import threading
 import webbrowser
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(Path(__file__).parent))
+WEB = Path(__file__).resolve().parent
+sys.path.insert(0, str(WEB))
 sys.path.insert(0, str(ROOT / "scripts"))
 import splib  # noqa: E402
 import build_site  # noqa: E402
+
+
+def random_fallback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def preferred_port() -> int:
@@ -38,21 +51,54 @@ def preferred_port() -> int:
     return random_fallback_port()
 
 
-def random_fallback_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def deps_ready() -> bool:
+    try:
+        import fastapi  # noqa
+        import httpx  # noqa
+        import jinja2  # noqa
+        import uvicorn  # noqa
+        return True
+    except ImportError:
+        return False
+
+
+def ensure_deps() -> bool:
+    if deps_ready():
+        return True
+    print("首次运行：安装工作台依赖（fastapi / uvicorn / httpx / jinja2）……")
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                        "-r", str(WEB / "requirements-web.txt")])
+    if r.returncode == 0 and deps_ready():
+        print("依赖安装完成 ✓")
+        return True
+    print("依赖自动安装失败——本次以纯静态模式启动（判读/浏览可用，无创作环）。"
+          "可手动执行：pip install -r web/requirements-web.txt")
+    return False
+
+
+def serve_static(site: Path, port: int) -> None:
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                directory=str(site))
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
+    print(f"静态站点已启动：http://127.0.0.1:{port}/（纯静态模式）")
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n已停止。")
+    finally:
+        httpd.server_close()
 
 
 def main() -> int:
     splib.force_utf8_stdio()
     ap = argparse.ArgumentParser(description="StylePack 工作台入口（本地）")
-    ap.add_argument("--port", type=int, default=0, help="端口，默认自动挑选")
+    ap.add_argument("--port", type=int, default=0, help="端口，默认自动挑选（首选 8765）")
     ap.add_argument("--site", default=str(ROOT / "web" / "site"),
                     help="站点目录（默认 web/site）")
     ap.add_argument("--no-build", action="store_true", help="跳过构建，直接用现有 site/")
     ap.add_argument("--no-open", action="store_true", help="不自动开浏览器")
     ap.add_argument("--build-only", action="store_true", help="只构建站点后退出")
+    ap.add_argument("--static-only", action="store_true", help="纯静态模式（无创作环）")
     args = ap.parse_args()
 
     site = Path(args.site)
@@ -64,20 +110,25 @@ def main() -> int:
         return 0
 
     port = args.port or preferred_port()
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
-                                directory=str(site))
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
     url = f"http://127.0.0.1:{port}/"
-    print(f"StylePack 工作台已启动：{url}")
-    print("本服务只监听本机（127.0.0.1），数据不出机器；按 Ctrl+C 停止。")
-    if not args.no_open:
-        threading.Timer(0.6, webbrowser.open, (url,)).start()
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\n已停止。")
-    finally:
-        httpd.server_close()
+    full_mode = (not args.static_only) and ensure_deps()
+    if full_mode:
+        from server import create_app
+        app = create_app(site_dir=site)
+        print(f"StylePack 工作台已启动：{url}")
+        print("全模式：判读/浏览/canon + 模型配置 + 创作环。"
+              "仅监听本机（127.0.0.1），数据不出机器；按 Ctrl+C 停止。")
+        if not args.no_open:
+            threading.Timer(0.8, webbrowser.open, (url,)).start()
+        try:
+            import uvicorn
+            uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+        except KeyboardInterrupt:
+            print("\n已停止。")
+    else:
+        if not args.no_open:
+            threading.Timer(0.6, webbrowser.open, (url,)).start()
+        serve_static(site, port)
     return 0
 
 

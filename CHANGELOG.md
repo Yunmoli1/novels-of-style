@@ -2,6 +2,36 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.6.0] - 2026-10-07
+
+### Added
+- **工作台 v0.6.0「创作环最小闭环」**（计划书：工作台阶段1-创作环最小闭环-计划书.md，
+  r4 阶段 1+2 重切执行）：
+  - **模型配置层**：多 provider（OpenAI 兼容）、测试连接（GET /models）、
+    **按模块路由**（写作/判官/批改分开绑，判官建议异源）；key 只存服务端
+    web/config.local.json（gitignore），GET 接口脱敏、页面永不回显
+  - **创作环状态机**（/app/create，蓝本 = style-apply 两级共创照搬）：
+    装配预览（所见即所发，每项带来源+token 估算；记忆注入预算制最小版）→
+    立意确认（2–3 方向，引 thought 条目）→ 拍子表（可编辑/单拍重掷）→
+    生成（1–3 稿并选）→ 三道门（fp_check/borrow_check advisory 报告 +
+    判官模型收尾检查）→ 确认交付 → 落盘 manuscript/ + sessions/（含装配
+    快照可复判，sessions 自带 .gitignore）
+  - **工作区数据层**：项目发现（manuscript/bible/style/canon 标记）、
+    钉扎协议读取（style/pinned-pack.md 版本注头）、cost.jsonl 对齐 cost.py
+    同账本（web-create 条目加 model/tokens 附加字段）、会话 token 护栏
+  - **launch.py 升级**：首次运行自动安装 Web 依赖（requirements-web.txt，
+    依赖隔离 web/ 引擎层零依赖不变）；默认全模式（FastAPI + 静态站点同源），
+    --static-only 兜底；固定端口 8765 优先
+- tests/test_web_server.py（9 项）：**mock 模型服务器全流程 e2e**
+  （装配→立意→拍子→重掷→生成→收尾→落盘，零网络）+ 红线断言
+  （key 不入接口/会话记录/git、路径穿越拒绝、仅本机绑定）；
+  总测试 116+9 → **125+9**
+- web/requirements-web.txt；技能引用修正（style-apply/style-setup 的
+  packs/narrative → docs/references，v0.5.3 遗留）
+
+### Changed
+- 静态导航增"模型配置/创作"入口（file:// 模式为死链，服务器模式生效）
+
 ## [0.5.3] - 2026-10-07
 
 ### Added

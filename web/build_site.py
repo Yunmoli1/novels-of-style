@@ -148,6 +148,8 @@ def layout(title: str, body: str, active: str, rel: str = "../") -> str:
         navlink(f"{rel}judging/", "盲测判读台", "judging"),
         navlink(f"{rel}packs/", "包浏览", "packs"),
         navlink(f"{rel}canon/", "canon 包", "canon"),
+        '<a href="/app/config">模型配置</a>',
+        '<a href="/app/create">创作</a>',
     ]
     return f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
