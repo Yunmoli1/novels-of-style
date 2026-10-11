@@ -149,13 +149,28 @@ async function doGenerate() {
 function renderDrafts() {
   $('drafts').innerHTML = S.drafts.map((dr, i) => {
     const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
-    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）
+    const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
+    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${badge}
       <div class="passage" style="max-height:340px;overflow:auto">${dr.text.replace(/</g, '&lt;')}</div>
       <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
+      <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
       <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
       <span id="end_${i}" class="meta"></span></div>`;
   }).join('');
   $('pick').innerHTML = S.drafts.map((_, i) => `<option value="${i}">稿 ${i + 1}</option>`).join('');
+}
+async function reviseDraft(i) {
+  const d = S.drafts[i];
+  try {
+    const r = await post('/app/api/revise', {...S.req, title: $('title').value,
+      chosen: S.chosen || {}, beats: S.beats, text: d.text,
+      reports: { fp_check: d.fp_check, borrow_check: d.borrow_check, ending: d.ending || null },
+      revision: d.revision || 0, session_id: S.session_id });
+    S.session_id = r.session_id;
+    S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
+                    borrow_check: r.borrow_check, revision: r.revision, ending: null };
+    renderDrafts();
+  } catch (e) { alert('修订失败：' + e.message); }
 }
 async function endingCheck(i) {
   $('end_' + i).textContent = '判官检查中……';

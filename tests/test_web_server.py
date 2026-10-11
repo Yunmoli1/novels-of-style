@@ -24,6 +24,10 @@ MOCK_KEY = "sk-mock-1234567890"
 PROSE = ("他推门出去，街上正落着细雨。夜色像一层旧棉絮盖在屋顶上，"
          "远处有狗叫了两声，又静了。\n他攥紧了手里的钥匙，指节发白。")
 
+PROSE_REVISED = ("他推开门，细雨扑了一脸。夜色沉沉地压在屋顶上，远处的狗"
+                 "叫了两声，又归于沉寂。他把钥匙攥进掌心，指节泛白，"
+                 "一步一步走进那条被雨水泡软的巷子。")
+
 OUTLINE = {"options": [
     {"title": "方向A", "angle": "以小见大", "action": "立意1 小物承大情",
      "stance": "克制外化"}], "recommended": 0}
@@ -55,7 +59,9 @@ class MockHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
         user_msg = payload["messages"][-1]["content"]
-        if "只输出正文本身" in user_msg:
+        if "验收报告" in user_msg:
+            content = PROSE_REVISED
+        elif "只输出正文本身" in user_msg:
             content = PROSE
         elif "收尾检查" in user_msg:
             content = json.dumps({"violation": False, "reason": "物化收束，无立碑/安慰/点题"},
@@ -231,6 +237,17 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("细雨", draft["text"])
         self.assertIn("fp_check", draft)
         self.assertIn("borrow_check", draft)
+
+        rv = self.client.post("/app/api/revise", json={
+            **base, "chosen": OUTLINE["options"][0], "beats": BEATS["beats"],
+            "text": draft["text"],
+            "reports": {"fp_check": draft["fp_check"],
+                        "borrow_check": draft["borrow_check"]},
+            "revision": 0, "session_id": sid})
+        self.assertEqual(rv.status_code, 200)
+        self.assertIn("细雨", rv.json()["text"])
+        self.assertEqual(rv.json()["revision"], 1)
+        self.assertIn("fp_check", rv.json())
 
         e = self.client.post("/app/api/ending_check", json={
             "project": "测试项目", "title": "夜谈",

@@ -334,6 +334,58 @@ def do_generate(body: GenerateIn):
             "assembly_tokens": assembly["total_est_tokens"]}
 
 
+class ReviseIn(BaseModel):
+    project: str
+    pack: str
+    chapter_no: int
+    title: str
+    keywords: list[str] = []
+    chosen: dict = {}
+    beats: list[dict] = []
+    text: str
+    reports: dict = {}   # {fp_check/borrow_check: {exit_code, report}, ending: {...}}
+    revision: int = 0
+    session_id: str = ""
+
+
+def _gate_reports_text(reports: dict) -> str:
+    parts = []
+    for name in ("fp_check", "borrow_check"):
+        rep = reports.get(name) or {}
+        if rep.get("report"):
+            parts.append(f"[{name}] exit={rep.get('exit_code')}" + chr(10)
+                         + rep["report"])
+    ending = reports.get("ending")
+    if ending:
+        parts.append(f"[ending_check] violation={ending.get('violation')}：{ending.get('reason')}")
+    return (chr(10) * 2).join(parts) or "（无报告正文——按风格上下文的句长纪律自查）"
+
+
+@router.post("/revise")
+def do_revise(body: ReviseIn):
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    project_dir = _project_dir(cfg, body.project)
+    pack_dir = _pack_dir(body.pack)
+    assembly = assemble_mod.assemble(
+        project_dir, pack_dir, body.chapter_no, body.keywords,
+        cfg.get("context_budget_tokens", 24000))
+    prompt = creation.revise_prompt(body.chapter_no, body.title, body.beats,
+                                    assembly["kept_texts"], body.text,
+                                    _gate_reports_text(body.reports))
+    result = _do_model(cfg, "write", sid, prompt,
+                       cfg.get("prose_max_tokens", 3500), False)
+    with tempfile.TemporaryDirectory() as td:
+        draft_path = Path(td) / "revised.txt"
+        draft_path.write_text(result["text"], encoding="utf-8", newline="\n")
+        fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
+        borrow = _run_gate("borrow_check.py", [str(draft_path),
+                                               "--pack", str(pack_dir)])
+    return {"session_id": sid, "text": result["text"], "usage": result,
+            "fp_check": fp, "borrow_check": borrow,
+            "revision": int(body.revision) + 1}
+
+
 class EndingIn(BaseModel):
     project: str
     title: str

@@ -148,6 +148,33 @@ def prose_prompt(chapter_no: int, title: str, chosen: dict, beats: list[dict],
 {chr(10).join(context_blocks)}"""
 
 
+def revise_prompt(chapter_no: int, title: str, beats: list[dict],
+                  context_blocks: list[str], draft: str,
+                  gate_reports_text: str) -> str:
+    beat_lines = chr(10).join(f"拍{b.get('no')}：{b.get('beat')}" for b in beats)
+    return f"""请按验收报告修订第 {chapter_no} 章正文（题：《{title}》）。
+
+硬性要求：
+- 情节、拍子结构、立意、笑点与收尾钩子**全部保留**——只动语言层，不新增情节线；
+- 验收报告点名的每一条都要处理：句长/段长类超差（过短）就把碎段合并出呼吸——
+  把两三句合成 12–22 字的段落，超短段（≤6 字）连续不超过 3 行；
+- 报告没点名的部分尽量少动；改完自查一遍再输出。
+
+——验收报告（advisory，逐条处理）——
+{gate_reports_text}
+
+——当前正文（修订对象）——
+{draft}
+
+——拍子表（结构不得变）——
+{beat_lines}
+
+——风格上下文——
+{chr(10).join(context_blocks)}
+
+只输出修订后的完整正文（不要标题、不要解释）。"""
+
+
 def ending_check_prompt(title: str, draft_tail: str) -> str:
     return f"""请对《{title}》的结尾段做思想层收尾检查（硬性条目）：
 1. 是否在给人物立抒情碑（用意象为角色定格、树碑立传式收束）？
