@@ -48,6 +48,15 @@ class MockHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_thinking(self, payload, model):
+        """模拟思考型模型：max_tokens 全被推理吃掉，content 空、finish=length。"""
+        self._send({"choices": [{"message": {"content": "",
+                                             "reasoning_content": "（内部思考，省略……）"},
+                                 "finish_reason": "length"}],
+                    "model": model,
+                    "usage": {"prompt_tokens": 100,
+                              "completion_tokens": payload.get("max_tokens", 0)}})
+
     def do_GET(self):
         if self.path.endswith("/models"):
             self._send({"data": [{"id": "mock-write"}, {"id": "mock-judge"}]})
@@ -58,6 +67,13 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
+        model = payload.get("model", "mock")
+        if model == "mock-think":  # 永远只思考不输出
+            self._send_thinking(payload, model)
+            return
+        if model == "mock-think-once" and payload.get("max_tokens", 0) <= 3500:
+            self._send_thinking(payload, model)  # 预算加倍后即可正常输出
+            return
         user_msg = payload["messages"][-1]["content"]
         if "验收报告" in user_msg:
             content = PROSE_REVISED
@@ -74,8 +90,9 @@ class MockHandler(BaseHTTPRequestHandler):
             content = json.dumps(BEATS, ensure_ascii=False)
         else:
             content = PROSE
-        self._send({"choices": [{"message": {"content": content}}],
-                    "model": payload.get("model", "mock"),
+        self._send({"choices": [{"message": {"content": content},
+                                 "finish_reason": "stop"}],
+                    "model": model,
                     "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
 
 
@@ -271,6 +288,80 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("细雨", record)
         cost = (ws / "style" / "cost.jsonl").read_text(encoding="utf-8")
         self.assertIn("web-create", cost)
+
+    def _set_write_route(self, model):
+        cfg = appstate.load_config(self.cfg_path)
+        cfg["routing"]["write"] = {"provider": "mock", "model": model}
+        appstate.save_config(cfg, self.cfg_path)
+
+    def test_thinking_model_empty_retries_then_succeeds(self):
+        """v0.6.2 回归（真实事故）：思考型模型把 3500 tokens 全花在推理上，
+        content 为空、finish=length——chat() 自动加倍预算重试须救回正文，
+        且记账含重试消耗、带 retries 诊断字段。"""
+        self._set_write_route("mock-think-once")
+        try:
+            g = self.client.post("/app/api/generate", json={
+                "project": "测试项目", "pack": "luxun", "chapter_no": 3,
+                "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+                "beats": BEATS["beats"], "tone_note": "不指定",
+                "canon_anchor": "无", "n_drafts": 1, "session_id": "think1"})
+            self.assertEqual(g.status_code, 200)
+            draft = g.json()["drafts"][0]
+            self.assertIn("细雨", draft["text"])
+            self.assertEqual(draft["usage"]["retries"], 1)
+            self.assertGreaterEqual(draft["usage"]["completion_tokens"], 3500)
+            self.assertEqual(draft["usage"]["finish_reason"], "stop")
+        finally:
+            self._set_write_route("mock-write")
+
+    def test_thinking_model_gives_up_clean(self):
+        """加倍重试两次仍空 → 502 带可行动对策；绝不把空稿放进创作环。"""
+        self._set_write_route("mock-think")
+        try:
+            g = self.client.post("/app/api/generate", json={
+                "project": "测试项目", "pack": "luxun", "chapter_no": 3,
+                "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+                "beats": BEATS["beats"], "tone_note": "不指定",
+                "canon_anchor": "无", "n_drafts": 1, "session_id": "think2"})
+            self.assertEqual(g.status_code, 502)
+            self.assertIn("空正文", g.json()["detail"])
+            self.assertIn("思考", g.json()["detail"])
+        finally:
+            self._set_write_route("mock-write")
+
+    def test_save_rejects_empty_and_bad_title(self):
+        """v0.6.2 事故回归：空稿+空题被交付成 001-.md（0 字节）。
+        现在必须：空稿 400；空题落「未命名」；文件名非法字符消毒。"""
+        base = {"project": "测试项目", "pack": "luxun", "chapter_no": 4}
+        r = self.client.post("/app/api/save",
+                             json={**base, "title": "x", "text": "   "})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("拒绝交付", r.json()["detail"])
+        r2 = self.client.post("/app/api/save",
+                              json={**base, "title": "", "text": PROSE})
+        self.assertEqual(r2.status_code, 200)
+        ms = Path(self.tmp.name) / "ws" / "测试项目" / "manuscript"
+        self.assertTrue((ms / "004-未命名.md").is_file())
+        self.assertFalse((ms / "004-.md").exists())
+        r3 = self.client.post("/app/api/save",
+                              json={**base, "title": 'a/b:c"d', "text": PROSE})
+        self.assertEqual(r3.status_code, 200)
+        self.assertTrue((ms / "004-a_b_c_d.md").is_file())
+
+    def test_fp_check_empty_input_clean(self):
+        """空文件给干净报错（退出码 2），不再 ZeroDivisionError traceback——
+        v0.6.2 事故：空稿流进 fp_check，判官台显示整屏 Python 堆栈。"""
+        import subprocess
+        empty = Path(self.tmp.name) / "empty_draft.txt"
+        empty.write_text("", encoding="utf-8")
+        r = subprocess.run([sys.executable, str(S / "scripts" / "fp_check.py"),
+                            str(S / "stylepacks" / "luxun"), str(empty)],
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", timeout=120)
+        out = (r.stdout or "") + (r.stderr or "")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("为空", out)
+        self.assertNotIn("Traceback", out)
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

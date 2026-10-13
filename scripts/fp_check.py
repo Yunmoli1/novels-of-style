@@ -112,6 +112,11 @@ def main() -> int:
     if not files:
         print("错误：未找到任何待验收文本", file=sys.stderr)
         return 2
+    empties = [f.name for f in files if not splib.read_text(f)[0].strip()]
+    if empties:
+        print(f"错误：待验收文本为空（{'、'.join(empties)}）——无内容可比对，"
+              f"跳过检查（上游应拦截空稿，此处仅兜底）", file=sys.stderr)
+        return 2
 
     results = []
     label_texts: list[tuple[str, str]] = []

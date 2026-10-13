@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""routes_create：创作环与配置的 API（v0.6.0）。
+"""routes_create：创作环与配置的 API（v0.6.2）。
 
 红线落实：
 - GET /app/api/config 永不返回 api_key（sanitize）；
@@ -226,12 +226,17 @@ def _do_model(cfg: dict, route: str, session_id: str, prompt: str,
               max_tokens: int, json_mode: bool):
     base, key, model = _resolve_model(cfg, route)
     _guard(cfg, session_id, int(max_tokens * 1.5))
-    result = model_client.chat(base, key, model,
-                               [{"role": "system", "content": creation.SYSTEM},
-                                {"role": "user", "content": prompt}],
-                               temperature=cfg.get("temperature", 0.8),
-                               max_tokens=max_tokens)
+    try:
+        result = model_client.chat(base, key, model,
+                                   [{"role": "system", "content": creation.SYSTEM},
+                                    {"role": "user", "content": prompt}],
+                                   temperature=cfg.get("temperature", 0.8),
+                                   max_tokens=max_tokens)
+    except ValueError as exc:  # 已 sanitize，可直接示人
+        raise HTTPException(502, str(exc))
     _record_usage(session_id, result)
+    if not result["text"].strip():  # 双保险：chat() 已拦，此处兜底
+        raise HTTPException(502, "模型返回空正文（上游未拦住）——请重试或检查模型配置")
     if json_mode:
         try:
             result["json"] = creation.extract_json(result["text"])
@@ -421,14 +426,21 @@ class SaveIn(BaseModel):
 
 @router.post("/save")
 def do_save(body: SaveIn):
+    if not (body.text or "").strip():
+        raise HTTPException(400, "草稿为空，拒绝交付——请回到创作环重新生成或修订")
+    title = (body.title or "").strip()
+    for ch in '\\/:*?"<>|':  # Windows 文件名非法字符
+        title = title.replace(ch, "_")
+    title = title.strip(". ") or "未命名"  # 结尾点/空格在 Windows 非法；纯符号回退
+
     cfg = appstate.load_config()
     project_dir = _project_dir(cfg, body.project)
     ms = project_dir / "manuscript"
     ms.mkdir(parents=True, exist_ok=True)
-    target = ms / f"{body.chapter_no:03d}-{body.title}.md"
+    target = ms / f"{body.chapter_no:03d}-{title}.md"
     if target.exists():
         stamp = time.strftime("%H%M%S")
-        target = ms / f"{body.chapter_no:03d}-{body.title}-{stamp}.md"
+        target = ms / f"{body.chapter_no:03d}-{title}-{stamp}.md"
     target.write_text(body.text, encoding="utf-8", newline="\n")
 
     sessions = project_dir / "sessions"
@@ -438,9 +450,9 @@ def do_save(body: SaveIn):
         gitignore.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
     record = {
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-        "tool": "web-create v0.6.0", "session_id": body.session_id,
+        "tool": "web-create v0.6.2", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
-        "chapter_no": body.chapter_no, "title": body.title,
+        "chapter_no": body.chapter_no, "title": title,
         "chosen": body.chosen, "beats": body.beats,
         "tone_note": body.tone_note, "canon_anchor": body.canon_anchor,
         "checks": body.checks, "usage": body.usage,
@@ -454,5 +466,5 @@ def do_save(body: SaveIn):
                          chars=len(body.text), model=str(body.usage.get("model", "")),
                          tokens=(body.usage.get("prompt_tokens", 0)
                                  + body.usage.get("completion_tokens", 0)),
-                         note=f"第{body.chapter_no}章《{body.title}》")
+                         note=f"第{body.chapter_no}章《{title}》")
     return {"ok": True, "manuscript": str(target), "sessions_dir": str(sessions)}

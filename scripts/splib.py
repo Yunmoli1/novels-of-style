@@ -385,9 +385,11 @@ def split_chapters(text: str) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------- Burrows Delta
 
 def char_rates(text: str, chars: list[str]) -> dict[str, float]:
-    """给定字符集合在 text 中的频率（次/千字）。"""
+    """给定字符集合在 text 中的频率（次/千字）。空文本返回全 0（不除零）。"""
     total = _clen(text)
     want = set(chars)
+    if not total:
+        return {c: 0.0 for c in chars}
     cnt = Counter(c for c in text if c in want)
     return {c: (cnt.get(c, 0) / total * 1000) for c in chars}
 

@@ -2,6 +2,28 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.6.2] - 2026-10-13
+
+### Fixed
+- **思考型模型空稿全链路防御**（真实事故：deepseek-flash 生成正文时把
+  3500 tokens 全花在内部推理上，content 为空、finish_reason=length；
+  空稿一路流过三道门——fp_check 除零吐整屏堆栈、borrow_check "0 字"、
+  ending_check "原文为空"——最后还能交付成 `001-.md`（0 字节））：
+  - model_client.chat()：捕获 finish_reason/reasoning_content；空正文自动
+    加倍预算重试（最多 2 次，3500→7000→14000）；仍空则报可行动对策
+    （换非思考模型/供应商侧关思考/调大正文 max_tokens），绝不返回空稿；
+    usage 记账含重试真实消耗，带 finish_reason/retries 诊断字段入 sessions
+  - /generate、/revise 经 _do_model 统一兜底（ValueError→502 明示）；
+    /save 拒绝空稿（400）+ 空题落「未命名」+ 文件名非法字符消毒
+    （`\/:*?"<>|`→`_`，结尾点/空格剥离）
+  - fp_check：空输入干净报错退出码 2（不再 ZeroDivisionError）；
+    splib.char_rates 空文本守卫
+  - create.html：稿卡显示「正文 N 字」，空稿红色警告，前端拦截空稿的
+    修订/交付，空题交付前 confirm
+
+### Changed
+- 会话记录 tool 字段 web-create v0.6.0 → v0.6.2（v0.6.1 漏更）
+
 ## [0.6.1] - 2026-10-11
 
 ### Added

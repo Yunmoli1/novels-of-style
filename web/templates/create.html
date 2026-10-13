@@ -150,8 +150,11 @@ function renderDrafts() {
   $('drafts').innerHTML = S.drafts.map((dr, i) => {
     const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
     const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
-    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${badge}
-      <div class="passage" style="max-height:340px;overflow:auto">${dr.text.replace(/</g, '&lt;')}</div>
+    const n = (dr.text || '').length;
+    const emptyMark = n ? `｜正文 ${n} 字`
+      : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
+    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${badge}
+      <div class="passage" style="max-height:340px;overflow:auto">${(dr.text || '').replace(/</g, '&lt;')}</div>
       <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
       <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
       <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
@@ -161,6 +164,7 @@ function renderDrafts() {
 }
 async function reviseDraft(i) {
   const d = S.drafts[i];
+  if (!(d.text || '').trim()) return alert('空稿无需修订——请重新生成正文（若反复为空，多半是思考型模型耗尽了 max_tokens，见修订/生成报错提示）');
   try {
     const r = await post('/app/api/revise', {...S.req, title: $('title').value,
       chosen: S.chosen || {}, beats: S.beats, text: d.text,
@@ -186,6 +190,8 @@ async function endingCheck(i) {
 }
 async function doSave() {
   const i = +$('pick').value;
+  if (!(S.drafts[i].text || '').trim()) return alert('草稿为空，拒绝交付——请重新生成');
+  if (!$('title').value.trim() && !confirm('章节题为空，将保存为「未命名」，继续？')) return;
   const d = await post('/app/api/save', {...S.req, title: $('title').value,
     text: S.drafts[i].text, chosen: S.chosen || {}, beats: S.beats,
     tone_note: $('tone_note').value, canon_anchor: $('canon_anchor').value,
