@@ -20,8 +20,8 @@
 <div><!-- 左列：步骤流 -->
 
 <div class="panel">
-  <label>项目 <select id="project"></select></label>
-  <label>风格包 <select id="pack"></select></label>
+  <label>项目 <select id="project" onchange="loadPresets()"></select></label>
+  <label>风格包 <select id="pack" onchange="loadPresets()"></select></label>
   <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
   <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
   <label>关键词（顿号分隔）<input id="keywords" style="width:240px" placeholder="人物/物件/本章涉及"></label>
@@ -63,8 +63,10 @@
   <div class="stagebar" id="stagebar"></div>
   <p class="meta" id="genmeta">模型：-｜目标正文 ≈ - 字</p>
   <div class="genrow">
-    <label>调子声明 <input id="tone_note" style="width:180px"></label>
-    <label>原作锚点 <input id="canon_anchor" style="width:220px"></label>
+    <label>调子声明 <input id="tone_note" list="tone_list" style="width:180px" placeholder="从建议选或自填"></label>
+    <datalist id="tone_list"></datalist>
+    <label>原作锚点 <input id="canon_anchor" list="anchor_list" style="width:220px" placeholder="从建议选或自填"></label>
+    <datalist id="anchor_list"></datalist>
     <label>稿数 <select id="n_drafts"><option>1</option><option>2</option><option>3</option></select></label>
     <label><input type="checkbox" id="use_stream" checked> 流式</label>
   </div>
@@ -148,6 +150,16 @@ async function init() {
     S.modelLabel = (w.provider || '?') + '/' + (w.model || '未配置');
   } catch (e) {}
   updateMeta();
+  loadPresets();
+}
+async function loadPresets() {
+  try {
+    const q = 'project=' + encodeURIComponent($('project').value || '')
+            + '&pack=' + encodeURIComponent($('pack').value || '');
+    const p = await (await fetch('/app/api/presets?' + q)).json();
+    $('tone_list').innerHTML = (p.tones || []).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+    $('anchor_list').innerHTML = (p.anchors || []).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+  } catch (e) {}
 }
 async function doAssemble() {
   S.req = { project: $('project').value, pack: $('pack').value,
@@ -229,10 +241,12 @@ async function reroll(no) {
 function cardHtml(dr, i) {
   const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
   const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
+  const trunc = dr.usage && dr.usage.finish_reason === 'length'
+    ? '｜<span style="color:var(--bad)">⚠ 输出被截断——建议再修订一次或换非思考模型</span>' : '';
   const n = (dr.text || '').length;
   const emptyMark = n ? `｜正文 ${n} 字`
     : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
-  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${badge}
+  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${trunc}${badge}
     <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>
     <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
     <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
@@ -258,6 +272,15 @@ function appendStream(i, text) {
   if (!box) return;
   box.appendChild(document.createTextNode(text));
   box.scrollTop = box.scrollHeight;
+}
+function replaceStream(i, text, chars) {
+  const box = $('box_' + i) || $('rbox_' + i);
+  if (!box) return;
+  box.textContent = '';
+  box.appendChild(document.createTextNode(text));
+  box.scrollTop = box.scrollHeight;
+  const live = $('live_' + i);
+  if (live) live.textContent = `……已生成 ${chars} 字`;
 }
 async function doGenerate() {
   if (!S.beats.length) return alert('先完成拍子表');
@@ -294,6 +317,8 @@ function onGenEvent(ev, d) {
     appendStream(d.index, d.text);
     const live = $('live_' + d.index);
     if (live) live.textContent = `……已生成 ${d.chars} 字`;
+  } else if (ev === 'replace') {
+    replaceStream(d.index, d.text, d.chars);
   } else if (ev === 'reasoning') {
     const live = $('live_' + d.index);
     if (live) live.textContent = '……模型思考中（reasoning）';
@@ -328,6 +353,7 @@ async function reviseDraft(i) {
       await sse('/app/api/revise_stream', body, (ev, r) => {
         if (ev === 'session') S.session_id = r.session_id;
         else if (ev === 'delta') appendStream(i, r.text);
+        else if (ev === 'replace') replaceStream(i, r.text, r.chars);
         else if (ev === 'status' || ev === 'error') {
           $('gen_out').textContent = r.message;
           if (ev === 'error') renderDrafts();  // 恢复卡片原状

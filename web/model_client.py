@@ -29,9 +29,11 @@ def _candidates(base_url: str, path: str) -> list[str]:
 def chat(base_url: str, api_key: str | None, model: str, messages: list[dict],
          temperature: float = 0.8, max_tokens: int = 3500,
          timeout: float = 240.0) -> dict:
-    """一次对话调用。空正文防护（v0.6.2）：思考型模型可能把 max_tokens 全花在
-    内部推理上，返回 content=""——此时自动加倍预算重试（最多 2 次），仍为空则
-    报可行动的错（换非思考模型/关思考/调大 max_tokens），绝不把空稿放进创作环。
+    """一次对话调用。空稿/截断防护（v0.6.2/v0.6.5）：思考型模型可能把 max_tokens
+    全花在内部推理上（content 空），或正文写到一半被截断（finish=length）——
+    两种情况都自动加倍预算重试（最多 3 次，取最长结果），仍空则报可行动的错
+    （换非思考模型/关思考/调大 max_tokens），绝不把空稿放进创作环；截断结果
+    原样返回但带 finish_reason=length 供前端警告。
     usage 记账含重试消耗（真实花费），并带 finish_reason/retries 诊断字段。
     """
     payload = {"model": model, "messages": messages,
@@ -41,10 +43,11 @@ def chat(base_url: str, api_key: str | None, model: str, messages: list[dict],
     url: str | None = None
     data: dict | None = None
     text, finish = "", None
+    best, best_finish = "", None
     acc = {"prompt_tokens": 0, "completion_tokens": 0}
     retries = 0
     budget = max_tokens
-    for attempt in range(3):  # 首次 + 最多 2 次加倍重试
+    for attempt in range(4):  # 首次 + 最多 3 次加倍重试
         payload["max_tokens"] = budget
         candidates = [url] if url else _candidates(base_url, "/chat/completions")
         data = None
@@ -77,17 +80,22 @@ def chat(base_url: str, api_key: str | None, model: str, messages: list[dict],
         acc["prompt_tokens"] += int(usage.get("prompt_tokens") or 0)
         acc["completion_tokens"] += int(usage.get("completion_tokens") or 0)
         text = msg.get("content") or ""
-        if text.strip():
+        if len(text) > len(best):  # 阶梯越加越大，取最长结果
+            best, best_finish = text, finish
+        if text.strip() and finish != "length":
+            break  # 完整正文（截断 finish=length 也重试——v0.6.5：修订缩水根因）
+        if attempt == 3:
             break
-        if attempt == 2:
-            hint = ("响应含思考内容（reasoning_content）——思考型模型把 token 花在推理上；"
-                    if has_reasoning else "")
-            raise ValueError(
-                f"模型返回空正文（finish_reason={finish}，已自动加倍预算重试 "
-                f"{retries} 次至 {budget} tokens 仍为空）。{hint}"
-                "对策：换非思考模型、在供应商侧关闭思考模式、或调大「正文 max_tokens」")
         retries += 1
         budget *= 2
+    text, finish = best, best_finish
+    if not text.strip():
+        hint = ("响应含思考内容（reasoning_content）——思考型模型把 token 花在推理上；"
+                if has_reasoning else "")
+        raise ValueError(
+            f"模型返回空正文（finish_reason={finish}，已自动加倍预算重试 "
+            f"{retries} 次至 {budget} tokens 仍为空）。{hint}"
+            "对策：换非思考模型、在供应商侧关闭思考模式、或调大「正文 max_tokens」")
     return {"text": text, **acc, "model": data.get("model") or model,
             "finish_reason": finish, "retries": retries}
 

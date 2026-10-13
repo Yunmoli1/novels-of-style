@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""routes_create：创作环与配置的 API（v0.6.4：字数挡位 + 流式生成现场）。
+"""routes_create：创作环与配置的 API（v0.6.5：截断重试/防缩水/预设选项）。
 
 红线落实：
 - GET /app/api/config 永不返回 api_key（sanitize）；
@@ -214,6 +214,46 @@ class AssembleIn(BaseModel):
     keywords: list[str] = []
 
 
+@router.get("/presets")
+def presets(project: str = "", pack: str = ""):
+    """调子/锚点初始选项（datalist 建议，不强制）：调子取包 registers.md 分区名
+    （无则通用建议集）；锚点取项目 sessions 实际用过的 canon_anchor（新→旧）。"""
+    tones = ["不指定"]
+    tone_source = "generic"
+    reg = None
+    if pack:
+        try:
+            reg = _pack_dir(pack) / "registers.md"
+        except HTTPException:
+            reg = None
+    if reg and reg.is_file():
+        for line in reg.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = line.strip()
+            if s.startswith("#### ") and s[5:].strip() not in tones:
+                tones.append(s[5:].strip())
+        if len(tones) > 1:
+            tone_source = "registers"
+    if tone_source == "generic":
+        tones += ["轻快日常", "紧张压迫", "温情", "荒诞喜剧", "沉郁压抑"]
+    anchors = ["无"]
+    if project:
+        cfg = appstate.load_config()
+        try:
+            pdir = _project_dir(cfg, project)
+        except HTTPException:
+            pdir = None
+        if pdir:
+            for j in sorted((pdir / "sessions").glob("*.json"), reverse=True):
+                try:
+                    a = json.loads(j.read_text(encoding="utf-8")).get("canon_anchor")
+                except (OSError, ValueError):
+                    continue
+                if a and a != "无" and a.strip() not in anchors:
+                    anchors.append(a.strip())
+    return {"tones": tones[:12], "tone_source": tone_source,
+            "anchors": anchors[:10]}
+
+
 @router.post("/assemble")
 def do_assemble(body: AssembleIn):
     cfg = appstate.load_config()
@@ -387,6 +427,7 @@ def _stream_one_draft(cfg: dict, sid: str, prompt: str, budget: int,
     _guard(cfg, sid, int(budget * 1.5))
     parts: list[str] = []
     usage: dict = {}
+    finish: str | None = None
     try:
         for ev in model_client.chat_stream(base, key, model, messages,
                                            temperature=cfg.get("temperature", 0.8),
@@ -399,23 +440,32 @@ def _stream_one_draft(cfg: dict, sid: str, prompt: str, budget: int,
                 yield _sse("reasoning", index=index)
             else:
                 usage = ev["usage"]
+                finish = ev.get("finish_reason")
     except ValueError as exc:
         yield _sse("status", message=f"流式不可用（{_short(exc)}），回退整段生成……")
     text = "".join(parts)
-    if not text.strip():
-        yield _sse("status", message="流式返回空正文——加倍预算回退重试……")
+    if not text.strip() or finish == "length":  # 空稿或截断 → 加倍回退（v0.6.5）
+        why = "输出被截断（finish=length）" if text.strip() else "流式返回空正文"
+        yield _sse("status", message=f"{why}——加倍预算回退重试……")
         try:
             result = _do_model(cfg, "write", sid, prompt, budget * 2, False)
         except HTTPException as exc:
-            yield _sse("error", message=str(exc.detail))
-            return
-        text, usage = result["text"], result
-        yield _sse("delta", index=index, text=text, chars=len(text))
+            if text.strip():  # 保留截断部分，前端按徽标警告
+                yield _sse("status", message=f"回退失败：{_short(exc)}；"
+                                             "保留流式部分稿（截断，建议再修订）")
+            else:
+                yield _sse("error", message=str(exc.detail))
+                return
+        else:
+            if len(result["text"]) > len(text):
+                text, usage = result["text"], result
+                yield _sse("replace", index=index, text=text, chars=len(text))
     if not text.strip():
         yield _sse("error", message="模型返回空正文（含回退重试）——"
                                     "请按报错对策更换模型或关闭思考模式")
         return
     usage = {**usage, "model": usage.get("model") or model}
+    usage.setdefault("finish_reason", finish)  # 截断时前端据此警告
     _record_usage(sid, usage)
     yield _sse("status", index=index, message="门禁运行中（fp_check/borrow_check）……")
     with tempfile.TemporaryDirectory() as td:
@@ -494,7 +544,9 @@ def _prep_revise(cfg: dict, body: ReviseIn) -> dict:
                                     assembly["kept_texts"], body.text,
                                     _gate_reports_text(body.reports), target)
     return {"pack_dir": pack_dir, "prompt": prompt,
-            "budget": _prose_budget(cfg, target)}
+            # ×2：修订要整篇重写（输出≈原文），思考型模型的推理也吃同一预算——
+            # 2500 字章在 ×1 下实测推理+正文 >14000 tokens 被截成 1099 字
+            "budget": _prose_budget(cfg, target) * 2}
 
 
 @router.post("/revise")
@@ -592,7 +644,7 @@ def do_save(body: SaveIn):
         gitignore.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
     record = {
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-        "tool": "web-create v0.6.3", "session_id": body.session_id,
+        "tool": "web-create v0.6.5", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
         "chapter_no": body.chapter_no, "title": title,
         "target_chars": _clean_target_chars(body.target_chars),

@@ -72,12 +72,18 @@ class MockHandler(BaseHTTPRequestHandler):
         LAST["payload"] = payload
         LAST["user_msg"] = payload["messages"][-1]["content"]
         model = payload.get("model", "mock")
+        trunc = model == "mock-trunc"  # 截断模型：≤7000 给半截+length，>7000 全文（修订预算 ×2 首试也截断）
         thinking = (model == "mock-think"
                     or (model == "mock-think-once"
                         and payload.get("max_tokens", 0) <= 3500))
         if payload.get("stream"):  # v0.6.4 流式
             if thinking:
                 self._send_stream(payload, "", ["（内部思考，省略……）"], "length")
+            elif trunc:
+                full = self._content_for(LAST["user_msg"])
+                cut = payload.get("max_tokens", 0) <= 7000
+                self._send_stream(payload, full if not cut else full[:30],
+                                  None, "stop" if not cut else "length")
             else:
                 self._send_stream(payload, self._content_for(LAST["user_msg"]),
                                   None, "stop")
@@ -85,8 +91,14 @@ class MockHandler(BaseHTTPRequestHandler):
         if thinking:
             self._send_thinking(payload, model)
             return
-        self._send({"choices": [{"message": {"content": self._content_for(LAST["user_msg"])},
-                                 "finish_reason": "stop"}],
+        if trunc:
+            full = self._content_for(LAST["user_msg"])
+            cut = payload.get("max_tokens", 0) <= 7000
+            content, fr = (full[:30], "length") if cut else (full, "stop")
+        else:
+            content, fr = self._content_for(LAST["user_msg"]), "stop"
+        self._send({"choices": [{"message": {"content": content},
+                                 "finish_reason": fr}],
                     "model": model,
                     "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
 
@@ -496,6 +508,69 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("细雨", r.text)
         self.assertIn('"revision": 1', r.text)
         self.assertIn("fp_check", r.text)
+
+    def test_truncated_revision_retried_longer(self):
+        """v0.6.5 事故回归（修订 2500→1099 字）：思考模型推理吃满预算，
+        finish=length 的**非空截断**稿曾被视为正常结果放行——现在必须加倍
+        重试取完整文本（非流）。"""
+        self._set_write_route("mock-trunc")
+        try:
+            g = self.client.post("/app/api/revise", json={
+                "project": "测试项目", "pack": "luxun", "chapter_no": 7,
+                "title": "夜谈", "keywords": [], "chosen": {},
+                "beats": BEATS["beats"], "text": PROSE,
+                "reports": {"fp_check": {"exit_code": 1, "report": "句长超差"}},
+                "revision": 0, "target_chars": 2500})
+            self.assertEqual(g.status_code, 200)
+            self.assertEqual(g.json()["text"], PROSE_REVISED)  # 不是 30 字截断版
+            self.assertEqual(g.json()["usage"]["finish_reason"], "stop")
+            self.assertEqual(g.json()["usage"]["retries"], 1)
+        finally:
+            self._set_write_route("mock-write")
+
+    def test_stream_truncated_replaced_with_full(self):
+        """流式截断 → 回退整段加倍链拿到全文 → replace 事件替换部分稿。"""
+        self._set_write_route("mock-trunc")
+        try:
+            r = self.client.post("/app/api/generate_stream", json={
+                "project": "测试项目", "pack": "luxun", "chapter_no": 7,
+                "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+                "beats": BEATS["beats"], "tone_note": "不指定",
+                "canon_anchor": "无", "n_drafts": 1, "target_chars": 2500})
+            self.assertEqual(r.status_code, 200)
+            body = r.text
+            self.assertIn("event: replace", body)
+            self.assertIn("细雨", body)
+            self.assertNotIn('"finish_reason": "length"', body.split("draft_done")[-1])
+        finally:
+            self._set_write_route("mock-write")
+
+    def test_revise_prompt_antishrink(self):
+        """防缩水条款进提示词：原文约 N 字 / 不得低于下限 / 禁删减凑合规。"""
+        r = self.client.post("/app/api/revise", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 7,
+            "title": "夜谈", "keywords": [], "chosen": {},
+            "beats": BEATS["beats"], "text": PROSE,
+            "reports": {}, "revision": 0, "target_chars": 2500})
+        self.assertEqual(r.status_code, 200)
+        msg = LAST["user_msg"]
+        self.assertIn("原文约", msg)
+        self.assertIn("不得低于", msg)
+        self.assertIn("严禁靠删情节", msg)
+
+    def test_presets_tones_and_anchors(self):
+        """调子/锚点初始选项：registers.md 分区名进 tones；sessions 的
+        canon_anchor 进 anchors；无 registers 的包回退通用建议集。"""
+        r = self.client.get("/app/api/presets",
+                            params={"project": "测试项目", "pack": "luxun"})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertEqual(d["tone_source"], "registers")
+        self.assertIn("不指定", d["tones"])
+        self.assertTrue(any("讽刺" in t or "温情" in t for t in d["tones"]))
+        self.assertIn("无", d["anchors"])
+        r2 = self.client.get("/app/api/presets", params={"pack": "luxun"})
+        self.assertEqual(r2.json()["anchors"], ["无"])  # 无项目 → 只有兜底
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

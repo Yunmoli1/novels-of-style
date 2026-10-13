@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""creation：创作环提示词与状态机辅助（v0.6.3：字数挡位贯通全环）。
+"""creation：创作环提示词与状态机辅助（v0.6.5：防缩水修订纪律）。
 
 蓝本 = style-apply 两级共创（照搬不发明）：
   第一级·立意确认：依 thought.md 提 2–3 个立意方向（题材角度+拟用立意动作
@@ -158,13 +158,16 @@ def revise_prompt(chapter_no: int, title: str, beats: list[dict],
                   context_blocks: list[str], draft: str,
                   gate_reports_text: str, target_chars: int = 0) -> str:
     beat_lines = chr(10).join(f"拍{b.get('no')}：{b.get('beat')}" for b in beats)
-    length_note = (f"\n- 改写后全文仍约 {target_chars} 字"
-                   f"（下限 {int(target_chars * 0.85)} 字），不得借机缩水或注水。"
-                   if target_chars else "")
+    n = len(draft)
+    goal = target_chars or n
+    length_note = (f"\n- 篇幅纪律：原文约 {n} 字，修订后仍约 {goal} 字、"
+                   f"**不得低于 {int(goal * 0.9)} 字**。")
     return f"""请按验收报告修订第 {chapter_no} 章正文（题：《{title}》）。
 
 硬性要求：
 - 情节、拍子结构、立意、笑点与收尾钩子**全部保留**——只动语言层，不新增情节线；{length_note}
+- **严禁靠删情节、删对白、缩写场景来"合并碎段"**——合并只针对排版碎行，
+  字数不够就从已有情节里展开细节与动作补足，缩水即不合格；
 - 验收报告点名的每一条都要处理：句长/段长类超差（过短）就把碎段合并出呼吸——
   把两三句合成 12–22 字的段落，超短段（≤6 字）连续不超过 3 行；
 - 报告没点名的部分尽量少动；改完自查一遍再输出。
