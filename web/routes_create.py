@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""routes_create：创作环与配置的 API（v0.6.2）。
+"""routes_create：创作环与配置的 API（v0.6.3：字数挡位）。
 
 红线落实：
 - GET /app/api/config 永不返回 api_key（sanitize）；
@@ -65,6 +65,24 @@ def _resolve_model(cfg: dict, route: str) -> tuple[str, str, str]:
     if not prov or not model:
         raise HTTPException(400, f"未配置 {route} 模型路由——请先到「模型配置」页设置")
     return prov["base_url"], prov.get("api_key"), model
+
+
+def _clean_target_chars(n) -> int:
+    """字数挡位消毒：0=未指定；越界/非法一律归 0（不猜测）。"""
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if 300 <= n <= 20000 else 0
+
+
+def _prose_budget(cfg: dict, target_chars: int) -> int:
+    """正文生成 max_tokens：显式字数挡位按 1 字≈0.75 token 换算（与 assemble
+    同口径）加 600 余量；只增不减地覆盖 prose_max_tokens 配置兜底。"""
+    base = cfg.get("prose_max_tokens", 3500)
+    if not target_chars:
+        return base
+    return max(base, int(target_chars * assemble_mod.CHARS_PER_TOKEN) + 600)
 
 
 def _guard(cfg: dict, session_id: str, est_tokens: int) -> None:
@@ -215,6 +233,7 @@ class OutlineIn(BaseModel):
     title: str
     keywords: list[str] = []
     user_notes: str = ""
+    target_chars: int = 0  # 字数挡位（v0.6.3）：0=未指定
     session_id: str | None = None
 
 
@@ -277,7 +296,8 @@ def do_beats(body: BeatsIn):
                   if (_project_dir(cfg, body.project) / "canon" / "canon-terms.json").is_file()
                   else "")
     prompt = creation.beats_prompt(body.chapter_no, body.title, body.chosen,
-                                   assembly["kept_texts"], canon_note)
+                                   assembly["kept_texts"], canon_note,
+                                   _clean_target_chars(body.target_chars))
     result = _do_model(cfg, "write", sid, prompt, 2400, True)
     return {"session_id": sid, **result["json"], "usage": result}
 
@@ -296,7 +316,8 @@ def do_reroll(body: RerollIn):
         body.chapter_no, body.keywords, cfg.get("context_budget_tokens", 24000))
     prompt = creation.reroll_beat_prompt(body.chapter_no, body.title, body.chosen,
                                          body.beats, body.index,
-                                         assembly["kept_texts"])
+                                         assembly["kept_texts"],
+                                         _clean_target_chars(body.target_chars))
     result = _do_model(cfg, "write", sid, prompt, 600, True)
     return {"session_id": sid, "beat": result["json"], "usage": result}
 
@@ -318,15 +339,16 @@ def do_generate(body: GenerateIn):
     assembly = assemble_mod.assemble(
         project_dir, pack_dir, body.chapter_no, body.keywords,
         cfg.get("context_budget_tokens", 24000))
+    target = _clean_target_chars(body.target_chars)
     prompt = creation.prose_prompt(body.chapter_no, body.title, body.chosen,
                                    body.beats, body.tone_note, body.canon_anchor,
                                    assembly["kept_texts"],
-                                   cfg.get("prose_max_tokens", 3500) * 2 // 3)
+                                   target or cfg.get("prose_max_tokens", 3500) * 2 // 3)
+    budget = _prose_budget(cfg, target)
     drafts = []
     with tempfile.TemporaryDirectory() as td:
         for i in range(max(1, min(3, body.n_drafts))):
-            result = _do_model(cfg, "write", sid, prompt,
-                               cfg.get("prose_max_tokens", 3500), False)
+            result = _do_model(cfg, "write", sid, prompt, budget, False)
             draft_path = Path(td) / f"d{i}.txt"
             draft_path.write_text(result["text"], encoding="utf-8", newline="\n")
             fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
@@ -350,6 +372,7 @@ class ReviseIn(BaseModel):
     text: str
     reports: dict = {}   # {fp_check/borrow_check: {exit_code, report}, ending: {...}}
     revision: int = 0
+    target_chars: int = 0
     session_id: str = ""
 
 
@@ -375,11 +398,12 @@ def do_revise(body: ReviseIn):
     assembly = assemble_mod.assemble(
         project_dir, pack_dir, body.chapter_no, body.keywords,
         cfg.get("context_budget_tokens", 24000))
+    target = _clean_target_chars(body.target_chars) or len(body.text or "")
     prompt = creation.revise_prompt(body.chapter_no, body.title, body.beats,
                                     assembly["kept_texts"], body.text,
-                                    _gate_reports_text(body.reports))
+                                    _gate_reports_text(body.reports), target)
     result = _do_model(cfg, "write", sid, prompt,
-                       cfg.get("prose_max_tokens", 3500), False)
+                       _prose_budget(cfg, target), False)
     with tempfile.TemporaryDirectory() as td:
         draft_path = Path(td) / "revised.txt"
         draft_path.write_text(result["text"], encoding="utf-8", newline="\n")
@@ -420,6 +444,7 @@ class SaveIn(BaseModel):
     canon_anchor: str = "无"
     checks: dict = {}
     usage: dict = {}
+    target_chars: int = 0
     session_id: str = ""
     assembly_preview: list[dict] = []
 
@@ -450,9 +475,10 @@ def do_save(body: SaveIn):
         gitignore.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
     record = {
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-        "tool": "web-create v0.6.2", "session_id": body.session_id,
+        "tool": "web-create v0.6.3", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
         "chapter_no": body.chapter_no, "title": title,
+        "target_chars": _clean_target_chars(body.target_chars),
         "chosen": body.chosen, "beats": body.beats,
         "tone_note": body.tone_note, "canon_anchor": body.canon_anchor,
         "checks": body.checks, "usage": body.usage,

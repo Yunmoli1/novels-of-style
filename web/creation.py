@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""creation：创作环提示词与状态机辅助（v0.6.0）。
+"""creation：创作环提示词与状态机辅助（v0.6.3：字数挡位贯通全环）。
 
 蓝本 = style-apply 两级共创（照搬不发明）：
   第一级·立意确认：依 thought.md 提 2–3 个立意方向（题材角度+拟用立意动作
@@ -86,7 +86,10 @@ thought.md「立意动作」中的条目编号与名称）+ 价值姿态落点�
 
 
 def beats_prompt(chapter_no: int, title: str, chosen: dict,
-                 context_blocks: list[str], canon_note: str) -> str:
+                 context_blocks: list[str], canon_note: str,
+                 target_chars: int = 0) -> str:
+    length_note = (f"\n本章目标约 {target_chars} 字——拍子数量与详略按此配比"
+                   f"（短章精简、长章给场景留呼吸）。" if target_chars else "")
     return f"""第 {chapter_no} 章（题：《{title}》）已选定立意：
 方向：{chosen.get('title', '')}
 角度：{chosen.get('angle', '')}
@@ -94,7 +97,7 @@ def beats_prompt(chapter_no: int, title: str, chosen: dict,
 价值姿态：{chosen.get('stance', '')}
 
 请产出本章拍子表（第二级·拍子表确认）：开场承接 / 场景 1 / 场景 2 / 结尾钩子
-（可 4–8 拍），每拍一行，写明【写什么、出现谁、给读者什么】。
+（可 4–8 拍），每拍一行，写明【写什么、出现谁、给读者什么】。{length_note}
 并附一行"调子声明"（无调子分区写"不指定"）与一行"原作锚点"（本章用到的
 术语/人物/事实红线；非二创写"无"）。{canon_note}
 
@@ -107,13 +110,15 @@ def beats_prompt(chapter_no: int, title: str, chosen: dict,
 
 def reroll_beat_prompt(chapter_no: int, title: str, chosen: dict,
                        beats: list[dict], index: int,
-                       context_blocks: list[str]) -> str:
+                       context_blocks: list[str], target_chars: int = 0) -> str:
     neighbors = "\n".join(f"拍{b['no']}：{b['beat']}" for b in beats
                           if abs((b.get("no") or 0) - index) <= 1)
+    length_note = (f"\n本章目标约 {target_chars} 字——此拍的体量须与整表配比一致。"
+                   if target_chars else "")
     return f"""第 {chapter_no} 章（题：《{title}》）立意：{chosen.get('title', '')}——{chosen.get('angle', '')}。
 现有拍子表：
 {neighbors}
-
+{length_note}
 请重掷第 {index} 拍：与相邻拍自然衔接、承担相同的叙事职责（承接/推进/钩子），
 但给出明显不同的走向。
 
@@ -137,7 +142,8 @@ def prose_prompt(chapter_no: int, title: str, chosen: dict, beats: list[dict],
 硬性要求：
 - 严格使用装配上下文中风格包档案的语言纪律：profile 的句式节奏与对话分层、
   lexicon 的签名词与禁用清单、limits 的分寸警告、thought 的禁区（尤其收尾）。
-- 篇幅约 {target_chars} 字。
+- 篇幅约 {target_chars} 字（合格下限 {int(target_chars * 0.85)} 字，上限
+  {int(target_chars * 1.2)} 字）；不为凑数注水，也不提前收笔。
 - 收尾执行思想层收尾检查：不给人物立抒情碑、不安慰读者、不点题升华；
   物化收束或实事托住的直抒才合法。
 
@@ -150,12 +156,15 @@ def prose_prompt(chapter_no: int, title: str, chosen: dict, beats: list[dict],
 
 def revise_prompt(chapter_no: int, title: str, beats: list[dict],
                   context_blocks: list[str], draft: str,
-                  gate_reports_text: str) -> str:
+                  gate_reports_text: str, target_chars: int = 0) -> str:
     beat_lines = chr(10).join(f"拍{b.get('no')}：{b.get('beat')}" for b in beats)
+    length_note = (f"\n- 改写后全文仍约 {target_chars} 字"
+                   f"（下限 {int(target_chars * 0.85)} 字），不得借机缩水或注水。"
+                   if target_chars else "")
     return f"""请按验收报告修订第 {chapter_no} 章正文（题：《{title}》）。
 
 硬性要求：
-- 情节、拍子结构、立意、笑点与收尾钩子**全部保留**——只动语言层，不新增情节线；
+- 情节、拍子结构、立意、笑点与收尾钩子**全部保留**——只动语言层，不新增情节线；{length_note}
 - 验收报告点名的每一条都要处理：句长/段长类超差（过短）就把碎段合并出呼吸——
   把两三句合成 12–22 字的段落，超短段（≤6 字）连续不超过 3 行；
 - 报告没点名的部分尽量少动；改完自查一遍再输出。

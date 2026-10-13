@@ -21,6 +21,8 @@ except ImportError:
 
 MOCK_KEY = "sk-mock-1234567890"
 
+LAST: dict = {}  # mock 捕获最近一次请求（payload/messages），供断言换算与提示词
+
 PROSE = ("他推门出去，街上正落着细雨。夜色像一层旧棉絮盖在屋顶上，"
          "远处有狗叫了两声，又静了。\n他攥紧了手里的钥匙，指节发白。")
 
@@ -67,6 +69,8 @@ class MockHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
+        LAST["payload"] = payload
+        LAST["user_msg"] = payload["messages"][-1]["content"]
         model = payload.get("model", "mock")
         if model == "mock-think":  # 永远只思考不输出
             self._send_thinking(payload, model)
@@ -167,9 +171,9 @@ class TestWebServer(unittest.TestCase):
         供应商合并 key（UI 承诺"留空 = 保持已存 key 不变"），否则每次保存洗 key。"""
         base = {"name": "mock", "base_url": f"http://127.0.0.1:{self.mock_port}/v1",
                 "models": ["mock-write"]}  # 无 api_key 字段
-        rev = self.client.get("/app/api/config").json()["rev"]
+        d = self.client.get("/app/api/config").json()
         r = self.client.post("/app/api/config", json={
-            "providers": [base], "routing": {}, "rev": rev})
+            "providers": [base], "routing": d["routing"], "rev": d["rev"]})
         self.assertEqual(r.status_code, 200)
         stored = appstate.load_config(self.cfg_path)
         self.assertEqual(stored["providers"][0].get("api_key"), MOCK_KEY,
@@ -362,6 +366,43 @@ class TestWebServer(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("为空", out)
         self.assertNotIn("Traceback", out)
+
+    def test_target_chars_tier_flows_through(self):
+        """v0.6.3 字数挡位：显式挡位进拍子/正文提示词；max_tokens 按字数换算
+        （1 字≈0.75 token，与 assemble 同口径，只增不减覆盖配置兜底）；
+        save 把挡位写入会话记录（复判可知当时目标）。"""
+        base = {"project": "测试项目", "pack": "luxun", "chapter_no": 5,
+                "title": "夜谈", "keywords": [], "target_chars": 4000}
+        b = self.client.post("/app/api/beats",
+                             json={**base, "chosen": OUTLINE["options"][0]})
+        self.assertEqual(b.status_code, 200)
+        self.assertIn("约 4000 字", LAST["user_msg"])
+        g = self.client.post("/app/api/generate", json={
+            **base, "chosen": OUTLINE["options"][0], "beats": BEATS["beats"],
+            "tone_note": "不指定", "canon_anchor": "无", "n_drafts": 1})
+        self.assertEqual(g.status_code, 200)
+        self.assertIn("约 4000 字", LAST["user_msg"])
+        self.assertGreaterEqual(LAST["payload"]["max_tokens"],
+                                int(4000 * 0.75) + 600)
+        self.assertIn("下限", LAST["user_msg"])  # 篇幅带合格下限/上限
+        s = self.client.post("/app/api/save", json={**base, "text": PROSE,
+                                                    "usage": {}})
+        self.assertEqual(s.status_code, 200)
+        recs = list((Path(self.tmp.name) / "ws" / "测试项目"
+                     / "sessions").glob("*.json"))
+        self.assertTrue(any('"target_chars": 4000' in p.read_text(encoding="utf-8")
+                            for p in recs), "挡位未入会话记录")
+
+    def test_target_chars_out_of_range_ignored(self):
+        """越界挡位（<300 / >20000）按未指定处理——回退配置兜底，不猜。"""
+        g = self.client.post("/app/api/generate", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 5,
+            "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+            "beats": BEATS["beats"], "tone_note": "不指定",
+            "canon_anchor": "无", "n_drafts": 1, "target_chars": 99999})
+        self.assertEqual(g.status_code, 200)
+        self.assertNotIn("99999", LAST["user_msg"])
+        self.assertEqual(LAST["payload"]["max_tokens"], 3500)  # 配置兜底
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

@@ -10,6 +10,15 @@
   <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
   <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
   <label>关键词（顿号分隔）<input id="keywords" style="width:240px" placeholder="人物/物件/本章涉及"></label>
+  <label>字数挡位 <select id="char_tier" onchange="tierChange()">
+    <option value="1500">短章 ≈1500 字</option>
+    <option value="2500" selected>标准 ≈2500 字</option>
+    <option value="4000">长章 ≈4000 字</option>
+    <option value="6000">特长 ≈6000 字</option>
+    <option value="custom">自定义…</option>
+  </select></label>
+  <input id="target_chars" type="number" min="300" max="20000" step="100" value="2500"
+         style="width:90px;display:none" title="自定义目标字数（300–20000）">
   <label>稿数 <select id="n_drafts"><option>1</option><option>2</option><option>3</option></select></label>
   <button class="btn" onclick="doAssemble()">装配预览</button>
 </div>
@@ -64,9 +73,19 @@ async function init() {
   $('pack').innerHTML = d.packs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
 }
 function keywords() { return $('keywords').value.split(/[、,，]/).map(s => s.trim()).filter(Boolean); }
+function tierChange() {
+  const custom = $('char_tier').value === 'custom';
+  $('target_chars').style.display = custom ? '' : 'none';
+  if (!custom) $('target_chars').value = $('char_tier').value;
+}
+function targetChars() {
+  const n = +$('target_chars').value || 0;
+  return n >= 300 && n <= 20000 ? n : 0;
+}
 async function doAssemble() {
   S.req = { project: $('project').value, pack: $('pack').value,
-    chapter_no: +$('chapter_no').value, keywords: keywords() };
+    chapter_no: +$('chapter_no').value, keywords: keywords(),
+    target_chars: targetChars() };
   S.assembly = await post('/app/api/assemble', S.req);
   const rows = S.assembly.items.map(i =>
     `<tr${i.dropped ? ' style="opacity:.4"' : ''}><td>${i.kind}</td><td>${i.source}</td>
@@ -77,7 +96,7 @@ async function doAssemble() {
     <table><thead><tr><th>类型</th><th>来源</th><th>字数</th><th>token 估算</th><th>摘录</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <p class="meta">合计 ${S.assembly.total_chars} 字 ≈ ${S.assembly.total_est_tokens} token / 预算 ${S.assembly.budget_tokens}
-    ${S.assembly.within_budget ? '✓ 预算内' : '⚠ 超预算（记忆项已裁）'}</p>`;
+    ${S.assembly.within_budget ? '✓ 预算内' : '⚠ 超预算（记忆项已裁）'}｜目标正文 ≈ ${targetChars() || '未设'} 字</p>`;
   $('step_outline').style.display = '';
   $('options').innerHTML = '<p class="meta">点「生成候选」让写作模型按 thought.md 立意动作提 2–3 个方向。</p><button class="btn" onclick="doOutline()">生成候选</button>';
 }
@@ -85,7 +104,7 @@ async function doOutline() {
   $('options').innerHTML = '<p class="meta">模型生成中……</p>';
   try {
     const d = await post('/app/api/outline', {...S.req, title: $('title').value,
-      user_notes: '', session_id: S.session_id });
+      user_notes: '', target_chars: targetChars(), session_id: S.session_id });
     S.session_id = d.session_id; S.lastOptions = d;
     const rec = d.recommended || 0;
     $('options').innerHTML = (d.options || []).map((o, i) =>
@@ -111,7 +130,7 @@ async function doBeats() {
   $('beats').innerHTML = '<p class="meta">模型生成中……</p>';
   try {
     const d = await post('/app/api/beats', {...S.req, title: $('title').value,
-      chosen: S.chosen, session_id: S.session_id });
+      chosen: S.chosen, target_chars: targetChars(), session_id: S.session_id });
     S.session_id = d.session_id; S.beats = d.beats || [];
     renderBeats(d.tone_note || '不指定', d.canon_anchor || '无');
   } catch (e) {
@@ -130,7 +149,8 @@ function renderBeats(tone, anchor) {
 async function reroll(no) {
   try {
     const d = await post('/app/api/reroll_beat', {...S.req, title: $('title').value,
-      chosen: S.chosen, beats: S.beats, index: no, session_id: S.session_id });
+      chosen: S.chosen, beats: S.beats, index: no,
+      target_chars: targetChars(), session_id: S.session_id });
     S.beats[no - 1] = d.beat; renderBeats($('tone_note').value, $('canon_anchor').value);
   } catch (e) { alert(e.message); }
 }
@@ -139,7 +159,7 @@ async function doGenerate() {
   try {
     const d = await post('/app/api/generate', {...S.req, title: $('title').value,
       chosen: S.chosen, beats: S.beats, tone_note: $('tone_note').value,
-      canon_anchor: $('canon_anchor').value,
+      canon_anchor: $('canon_anchor').value, target_chars: targetChars(),
       n_drafts: +$('n_drafts').value, session_id: S.session_id });
     S.session_id = d.session_id; S.drafts = d.drafts;
     $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
@@ -169,7 +189,7 @@ async function reviseDraft(i) {
     const r = await post('/app/api/revise', {...S.req, title: $('title').value,
       chosen: S.chosen || {}, beats: S.beats, text: d.text,
       reports: { fp_check: d.fp_check, borrow_check: d.borrow_check, ending: d.ending || null },
-      revision: d.revision || 0, session_id: S.session_id });
+      revision: d.revision || 0, target_chars: targetChars(), session_id: S.session_id });
     S.session_id = r.session_id;
     S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
                     borrow_check: r.borrow_check, revision: r.revision, ending: null };
@@ -197,7 +217,7 @@ async function doSave() {
     tone_note: $('tone_note').value, canon_anchor: $('canon_anchor').value,
     checks: { fp_check: S.drafts[i].fp_check, borrow_check: S.drafts[i].borrow_check,
               ending: S.drafts[i].ending || null },
-    usage: S.drafts[i].usage, session_id: S.session_id });
+    usage: S.drafts[i].usage, target_chars: targetChars(), session_id: S.session_id });
   $('save_out').innerHTML = `已交付 ✓ ${d.manuscript}｜会话已存 sessions/（可复判）`;
 }
 init();
