@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import splib  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-WS = ROOT.parent  # 工作区根（判读包 md 所在，仓库外）
+WS = ROOT.parent / "项目管理"  # 判读包 md 所在（项目管理/，仓库外）
 
 EXPECTED_PACKED = ["乙", "甲", "乙", "甲", "甲", "乙", "乙", "乙"]
 EXPECTED_SUBAGENT_HITS = 6

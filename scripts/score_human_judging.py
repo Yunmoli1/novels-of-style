@@ -8,7 +8,7 @@
     {"exported_at": ..., "rounds": [{"id": 1, "choice": "甲|乙|都不像", ...}]}
 
 答案卷 = evals/human_judging_answers.json（**不入 git**，本机由
-migrate_human_judging.py 生成；缺失时本脚本给出补救指引）。
+migrate_human_judging.py 生成（源 md 在 项目管理/）；缺失时本脚本给出补救指引）。
 
 输出两个一致率：
   ① 辨认带包臂命中率——你能否认出哪段装载了风格包；
