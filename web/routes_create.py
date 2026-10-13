@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""routes_create：创作环与配置的 API（v0.6.3：字数挡位）。
+"""routes_create：创作环与配置的 API（v0.6.4：字数挡位 + 流式生成现场）。
 
 红线落实：
 - GET /app/api/config 永不返回 api_key（sanitize）；
@@ -20,7 +20,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 import appstate
@@ -330,10 +330,8 @@ class GenerateIn(BeatsIn):
     session_id: str = ""
 
 
-@router.post("/generate")
-def do_generate(body: GenerateIn):
-    cfg = appstate.load_config()
-    sid = _session_id(body)
+def _prep_generate(cfg: dict, body: GenerateIn) -> dict:
+    """装配 + 提示词 + 预算：/generate 与 /generate_stream 共用（所见即所发）。"""
     project_dir = _project_dir(cfg, body.project)
     pack_dir = _pack_dir(body.pack)
     assembly = assemble_mod.assemble(
@@ -344,7 +342,17 @@ def do_generate(body: GenerateIn):
                                    body.beats, body.tone_note, body.canon_anchor,
                                    assembly["kept_texts"],
                                    target or cfg.get("prose_max_tokens", 3500) * 2 // 3)
-    budget = _prose_budget(cfg, target)
+    return {"pack_dir": pack_dir, "assembly": assembly, "prompt": prompt,
+            "budget": _prose_budget(cfg, target), "target": target}
+
+
+@router.post("/generate")
+def do_generate(body: GenerateIn):
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    prep = _prep_generate(cfg, body)
+    pack_dir, assembly, prompt, budget = (prep["pack_dir"], prep["assembly"],
+                                          prep["prompt"], prep["budget"])
     drafts = []
     with tempfile.TemporaryDirectory() as td:
         for i in range(max(1, min(3, body.n_drafts))):
@@ -359,6 +367,92 @@ def do_generate(body: GenerateIn):
     return {"session_id": sid, "drafts": drafts,
             "assembly_preview": assembly["items"],
             "assembly_tokens": assembly["total_est_tokens"]}
+
+
+# ---- 流式生成（v0.6.4）：SSE 事件流，生成现场侧栏逐字渲染 ----
+
+def _sse(type_: str, **fields) -> str:
+    return ("event: " + type_ + "\ndata: "
+            + json.dumps({"type": type_, **fields}, ensure_ascii=False) + "\n\n")
+
+
+def _stream_one_draft(cfg: dict, sid: str, prompt: str, budget: int,
+                      pack_dir: Path, index: int, done_event: str = "draft_done",
+                      extra: dict | None = None):
+    """产出一个稿的事件序列：流式优先；空稿/流式不可用回退非流加倍链（v0.6.2）。
+    结尾必发 done_event（成功）或 error（失败）——前端按此收口。"""
+    base, key, model = _resolve_model(cfg, "write")
+    messages = [{"role": "system", "content": creation.SYSTEM},
+                {"role": "user", "content": prompt}]
+    _guard(cfg, sid, int(budget * 1.5))
+    parts: list[str] = []
+    usage: dict = {}
+    try:
+        for ev in model_client.chat_stream(base, key, model, messages,
+                                           temperature=cfg.get("temperature", 0.8),
+                                           max_tokens=budget):
+            if ev["type"] == "delta":
+                parts.append(ev["text"])
+                yield _sse("delta", index=index, text=ev["text"],
+                           chars=sum(len(p) for p in parts))
+            elif ev["type"] == "reasoning":
+                yield _sse("reasoning", index=index)
+            else:
+                usage = ev["usage"]
+    except ValueError as exc:
+        yield _sse("status", message=f"流式不可用（{_short(exc)}），回退整段生成……")
+    text = "".join(parts)
+    if not text.strip():
+        yield _sse("status", message="流式返回空正文——加倍预算回退重试……")
+        try:
+            result = _do_model(cfg, "write", sid, prompt, budget * 2, False)
+        except HTTPException as exc:
+            yield _sse("error", message=str(exc.detail))
+            return
+        text, usage = result["text"], result
+        yield _sse("delta", index=index, text=text, chars=len(text))
+    if not text.strip():
+        yield _sse("error", message="模型返回空正文（含回退重试）——"
+                                    "请按报错对策更换模型或关闭思考模式")
+        return
+    usage = {**usage, "model": usage.get("model") or model}
+    _record_usage(sid, usage)
+    yield _sse("status", index=index, message="门禁运行中（fp_check/borrow_check）……")
+    with tempfile.TemporaryDirectory() as td:
+        draft_path = Path(td) / f"stream{index}.txt"
+        draft_path.write_text(text, encoding="utf-8", newline="\n")
+        fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
+        borrow = _run_gate("borrow_check.py", [str(draft_path),
+                                               "--pack", str(pack_dir)])
+    yield _sse(done_event, index=index, text=text, usage=usage,
+               fp_check=fp, borrow_check=borrow, **(extra or {}))
+
+
+def _short(exc: Exception, n: int = 120) -> str:
+    return str(exc)[:n]
+
+
+@router.post("/generate_stream")
+def do_generate_stream(body: GenerateIn):
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    prep = _prep_generate(cfg, body)
+    prov, model = appstate.resolve_route(cfg, "write")
+    model_label = f'{prov["name"]}/{model}' if prov else model
+
+    def gen():
+        yield _sse("session", session_id=sid, model=model_label,
+                   target_chars=prep["target"],
+                   assembly_tokens=prep["assembly"]["total_est_tokens"])
+        for i in range(max(1, min(3, body.n_drafts))):
+            yield _sse("draft_start", index=i)
+            yield from _stream_one_draft(cfg, sid, prep["prompt"], prep["budget"],
+                                         prep["pack_dir"], i)
+        yield _sse("all_done", assembly_tokens=prep["assembly"]["total_est_tokens"])
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
 
 
 class ReviseIn(BaseModel):
@@ -389,10 +483,7 @@ def _gate_reports_text(reports: dict) -> str:
     return (chr(10) * 2).join(parts) or "（无报告正文——按风格上下文的句长纪律自查）"
 
 
-@router.post("/revise")
-def do_revise(body: ReviseIn):
-    cfg = appstate.load_config()
-    sid = _session_id(body)
+def _prep_revise(cfg: dict, body: ReviseIn) -> dict:
     project_dir = _project_dir(cfg, body.project)
     pack_dir = _pack_dir(body.pack)
     assembly = assemble_mod.assemble(
@@ -402,17 +493,43 @@ def do_revise(body: ReviseIn):
     prompt = creation.revise_prompt(body.chapter_no, body.title, body.beats,
                                     assembly["kept_texts"], body.text,
                                     _gate_reports_text(body.reports), target)
-    result = _do_model(cfg, "write", sid, prompt,
-                       _prose_budget(cfg, target), False)
+    return {"pack_dir": pack_dir, "prompt": prompt,
+            "budget": _prose_budget(cfg, target)}
+
+
+@router.post("/revise")
+def do_revise(body: ReviseIn):
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    prep = _prep_revise(cfg, body)
+    result = _do_model(cfg, "write", sid, prep["prompt"], prep["budget"], False)
     with tempfile.TemporaryDirectory() as td:
         draft_path = Path(td) / "revised.txt"
         draft_path.write_text(result["text"], encoding="utf-8", newline="\n")
-        fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
+        fp = _run_gate("fp_check.py", [str(prep["pack_dir"]), str(draft_path)])
         borrow = _run_gate("borrow_check.py", [str(draft_path),
-                                               "--pack", str(pack_dir)])
+                                               "--pack", str(prep["pack_dir"])])
     return {"session_id": sid, "text": result["text"], "usage": result,
             "fp_check": fp, "borrow_check": borrow,
             "revision": int(body.revision) + 1}
+
+
+@router.post("/revise_stream")
+def do_revise_stream(body: ReviseIn):
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    prep = _prep_revise(cfg, body)
+
+    def gen():
+        yield _sse("session", session_id=sid)
+        yield _sse("status", message="按报告修订生成中……")
+        yield from _stream_one_draft(cfg, sid, prep["prompt"], prep["budget"],
+                                     prep["pack_dir"], 0, done_event="revised_done",
+                                     extra={"revision": int(body.revision) + 1})
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
 
 
 class EndingIn(BaseModel):

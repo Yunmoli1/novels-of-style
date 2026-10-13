@@ -2,6 +2,28 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.6.4] - 2026-10-13
+
+### Added
+- **流式输出（SSE）**：model_client.chat_stream()（OpenAI 兼容 delta 流；
+  供应商不认 stream_options 自动裸流重试；usage 缺失按字数粗估）+
+  /app/api/generate_stream 与 /revise_stream 事件流（session/draft_start/
+  delta/reasoning/status/draft_done|revised_done/error/all_done）。
+  正文与修订逐字上屏、实时字数、思考型模型显示"思考中"。
+  **流式不提高 max_tokens 上限**（上限仍由挡位换算与模型/供应商封顶决定），
+  但读超时按 chunk 间隔计——超长生成不再被"整段等待"的 240s 掐断，实际
+  可用输出更接近上限。空稿防御链完整继承：流式空稿 → 非流加倍回退 →
+  error 事件带对策，绝不吐空 draft_done。旧非流端点保留（插件红线：CLI/脚本
+  等价路径不动）
+- **创作页重排"生成现场"右侧栏**：双栏布局（步骤流左 / 生成现场右，窄屏
+  自动叠放）；侧栏含六阶段状态条（装配→立意→拍子→生成→门禁→交付，随操作
+  点亮）、模型路由标签、目标字数、调子/锚点/稿数/流式开关、生成按钮、
+  草稿卡片流式渲染、采用稿交付区；拍子表就绪前生成按钮禁用
+
+### Fixed
+- 多稿流式下 draft_done 全量重绘会抹掉仍在流式的其他稿卡片——改为只换
+  本稿卡片（refreshPick）
+
 ## [0.6.3] - 2026-10-13
 
 ### Added

@@ -72,32 +72,65 @@ class MockHandler(BaseHTTPRequestHandler):
         LAST["payload"] = payload
         LAST["user_msg"] = payload["messages"][-1]["content"]
         model = payload.get("model", "mock")
-        if model == "mock-think":  # 永远只思考不输出
+        thinking = (model == "mock-think"
+                    or (model == "mock-think-once"
+                        and payload.get("max_tokens", 0) <= 3500))
+        if payload.get("stream"):  # v0.6.4 流式
+            if thinking:
+                self._send_stream(payload, "", ["（内部思考，省略……）"], "length")
+            else:
+                self._send_stream(payload, self._content_for(LAST["user_msg"]),
+                                  None, "stop")
+            return
+        if thinking:
             self._send_thinking(payload, model)
             return
-        if model == "mock-think-once" and payload.get("max_tokens", 0) <= 3500:
-            self._send_thinking(payload, model)  # 预算加倍后即可正常输出
-            return
-        user_msg = payload["messages"][-1]["content"]
-        if "验收报告" in user_msg:
-            content = PROSE_REVISED
-        elif "只输出正文本身" in user_msg:
-            content = PROSE
-        elif "收尾检查" in user_msg:
-            content = json.dumps({"violation": False, "reason": "物化收束，无立碑/安慰/点题"},
-                                 ensure_ascii=False)
-        elif "重掷第" in user_msg:
-            content = json.dumps({"no": 2, "beat": "重掷后的场景：意外来客"}, ensure_ascii=False)
-        elif "2–3 个立意方向" in user_msg:
-            content = json.dumps(OUTLINE, ensure_ascii=False)
-        elif "拍子表" in user_msg:
-            content = json.dumps(BEATS, ensure_ascii=False)
-        else:
-            content = PROSE
-        self._send({"choices": [{"message": {"content": content},
+        self._send({"choices": [{"message": {"content": self._content_for(LAST["user_msg"])},
                                  "finish_reason": "stop"}],
                     "model": model,
                     "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
+
+    def _content_for(self, user_msg):
+        if "验收报告" in user_msg:
+            return PROSE_REVISED
+        if "只输出正文本身" in user_msg:
+            return PROSE
+        if "收尾检查" in user_msg:
+            return json.dumps({"violation": False, "reason": "物化收束，无立碑/安慰/点题"},
+                              ensure_ascii=False)
+        if "重掷第" in user_msg:
+            return json.dumps({"no": 2, "beat": "重掷后的场景：意外来客"}, ensure_ascii=False)
+        if "2–3 个立意方向" in user_msg:
+            return json.dumps(OUTLINE, ensure_ascii=False)
+        if "拍子表" in user_msg:
+            return json.dumps(BEATS, ensure_ascii=False)
+        return PROSE
+
+    def _send_stream(self, payload, content, reasoning, finish):
+        """OpenAI 风格 SSE chunk 流（delta 分片 + finish + 可选 usage 块）。"""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+        def chunk(obj):
+            self.wfile.write(b"data: "
+                             + json.dumps(obj, ensure_ascii=False).encode("utf-8")
+                             + b"\n\n")
+
+        chunk({"choices": [{"delta": {"role": "assistant"}}]})
+        for r in (reasoning or []):
+            chunk({"choices": [{"delta": {"reasoning_content": r}}]})
+        if content:
+            step = max(1, len(content) // 3)
+            for i in range(0, len(content), step):
+                chunk({"choices": [{"delta": {"content": content[i:i + step]}}]})
+        chunk({"choices": [{"delta": {}, "finish_reason": finish}]})
+        if payload.get("stream_options", {}).get("include_usage"):
+            chunk({"choices": [], "usage": {"prompt_tokens": 100,
+                   "completion_tokens": payload.get("max_tokens", 0)
+                   if finish == "length" else 50}})
+        self.wfile.write(b"data: [DONE]\n\n")
 
 
 @unittest.skipUnless(_HAS_DEPS, "web 依赖未安装（pip install -r web/requirements-web.txt）")
@@ -403,6 +436,66 @@ class TestWebServer(unittest.TestCase):
         self.assertEqual(g.status_code, 200)
         self.assertNotIn("99999", LAST["user_msg"])
         self.assertEqual(LAST["payload"]["max_tokens"], 3500)  # 配置兜底
+
+    def test_create_page_sidebar(self):
+        """v0.6.4 生成现场侧栏：页面可达、侧栏与流式端点在模板中。"""
+        r = self.client.get("/app/create")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("生成现场", r.text)
+        self.assertIn("generate_stream", r.text)
+
+    def test_generation_stream_e2e(self):
+        """v0.6.4 流式：SSE 事件齐全、正文逐字到齐、门禁随 draft_done 返回、
+        请求带 stream 且挡位进提示词、预算与挡位换算一致。"""
+        base = {"project": "测试项目", "pack": "luxun", "chapter_no": 6,
+                "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+                "beats": BEATS["beats"], "tone_note": "不指定",
+                "canon_anchor": "无", "n_drafts": 1, "target_chars": 1500}
+        r = self.client.post("/app/api/generate_stream", json=base)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/event-stream", r.headers["content-type"])
+        body = r.text
+        for ev in ("event: session", "event: draft_start", "event: delta",
+                   "event: draft_done", "event: all_done"):
+            self.assertIn(ev, body)
+        self.assertIn("细雨", body)
+        self.assertIn('"chars"', body)
+        self.assertTrue(LAST["payload"].get("stream"))
+        self.assertIn("约 1500 字", LAST["user_msg"])
+        self.assertEqual(LAST["payload"]["max_tokens"],
+                         max(3500, int(1500 * 0.75) + 600))  # 短挡不缩水，兜底
+
+    def test_stream_empty_falls_back_then_errors_clean(self):
+        """流式空稿（思考模型）：回退非流加倍链，仍空 → 流内 error 事件带对策，
+        绝不吐 draft_done 空稿（连接本身不炸）。"""
+        self._set_write_route("mock-think")
+        try:
+            r = self.client.post("/app/api/generate_stream", json={
+                "project": "测试项目", "pack": "luxun", "chapter_no": 6,
+                "title": "夜谈", "keywords": [], "chosen": OUTLINE["options"][0],
+                "beats": BEATS["beats"], "tone_note": "不指定",
+                "canon_anchor": "无", "n_drafts": 1, "session_id": "think3"})
+            self.assertEqual(r.status_code, 200)
+            body = r.text
+            self.assertIn("event: error", body)
+            self.assertIn("思考", body)
+            self.assertNotIn("event: draft_done", body)
+        finally:
+            self._set_write_route("mock-write")
+
+    def test_revise_stream_e2e(self):
+        """修订流式：revised_done 事件带修订轮次与两道门报告。"""
+        r = self.client.post("/app/api/revise_stream", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 6,
+            "title": "夜谈", "keywords": [], "chosen": {},
+            "beats": BEATS["beats"], "text": PROSE,
+            "reports": {"fp_check": {"exit_code": 1, "report": "句长超差"}},
+            "revision": 0, "target_chars": 1500})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("event: revised_done", r.text)
+        self.assertIn("细雨", r.text)
+        self.assertIn('"revision": 1', r.text)
+        self.assertIn("fp_check", r.text)
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

@@ -1,8 +1,23 @@
 {% extends "base.html" %}
 {% block title %}创作{% endblock %}
 {% block main %}
+<style>
+  main{max-width:1560px}
+  .create-grid{display:grid;grid-template-columns:minmax(0,1fr) 480px;gap:18px;align-items:start}
+  #gen_sidebar{position:sticky;top:12px;max-height:calc(100vh - 30px);overflow:auto}
+  .stagebar{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}
+  .stage{padding:2px 10px;border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12.5px}
+  .stage.done{color:var(--text)}
+  .stage.cur{color:#10131a;background:var(--accent);font-weight:600}
+  .streambox{max-height:46vh;overflow:auto}
+  .genrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  @media (max-width:1180px){.create-grid{grid-template-columns:1fr}#gen_sidebar{position:static;max-height:none}}
+</style>
 <h1>创作 · 正文环</h1>
-<p class="meta">状态机：装配预览 → 立意确认 → 拍子表 → 生成 → 三道门 → 确认交付。fp_check/borrow_check 是 advisory 报告不是门；收尾检查为思想层硬性条目，交付前必看。</p>
+<p class="meta">状态机：装配预览 → 立意确认 → 拍子表 → 生成（右侧栏，流式逐字）→ 三道门 → 确认交付。fp_check/borrow_check 是 advisory 报告不是门；收尾检查为思想层硬性条目，交付前必看。</p>
+
+<div class="create-grid">
+<div><!-- 左列：步骤流 -->
 
 <div class="panel">
   <label>项目 <select id="project"></select></label>
@@ -19,7 +34,6 @@
   </select></label>
   <input id="target_chars" type="number" min="300" max="20000" step="100" value="2500"
          style="width:90px;display:none" title="自定义目标字数（300–20000）">
-  <label>稿数 <select id="n_drafts"><option>1</option><option>2</option><option>3</option></select></label>
   <button class="btn" onclick="doAssemble()">装配预览</button>
 </div>
 
@@ -39,26 +53,39 @@
 <div id="step_beats" style="display:none">
 <h2>第二级 · 拍子表</h2>
 <div class="panel" id="beats"></div>
-<div class="panel">
-  <label>调子声明 <input id="tone_note" style="width:260px"></label>
-  <label>原作锚点 <input id="canon_anchor" style="width:320px"></label>
-  <button class="btn" onclick="doGenerate()">生成正文</button>
-  <span id="gen_out" class="meta"></span>
-</div>
+<p class="meta">拍子确认后 → 到右侧「生成现场」生成正文（流式逐字，可继续编辑拍子后重生成）。</p>
 </div>
 
-<div id="step_drafts" style="display:none">
-<h2>草稿与三道门</h2>
-<div id="drafts"></div>
-<div class="panel">
-  <label>采用稿 <select id="pick"></select></label>
-  <button class="btn" onclick="doSave()">确认交付（落盘 manuscript + sessions）</button>
-  <span id="save_out" class="meta"></span>
-</div>
-</div>
+</div><!-- /左列 -->
+
+<aside id="gen_sidebar" class="panel">
+  <h2 style="margin-top:0">生成现场</h2>
+  <div class="stagebar" id="stagebar"></div>
+  <p class="meta" id="genmeta">模型：-｜目标正文 ≈ - 字</p>
+  <div class="genrow">
+    <label>调子声明 <input id="tone_note" style="width:180px"></label>
+    <label>原作锚点 <input id="canon_anchor" style="width:220px"></label>
+    <label>稿数 <select id="n_drafts"><option>1</option><option>2</option><option>3</option></select></label>
+    <label><input type="checkbox" id="use_stream" checked> 流式</label>
+  </div>
+  <div class="genrow">
+    <button class="btn" id="btn_generate" disabled onclick="doGenerate()">生成正文</button>
+    <span id="gen_out" class="meta"></span>
+  </div>
+  <div id="drafts"></div>
+  <div class="panel" id="savebox" style="display:none">
+    <label>采用稿 <select id="pick"></select></label>
+    <button class="btn" onclick="doSave()">确认交付（落盘 manuscript + sessions）</button>
+    <span id="save_out" class="meta"></span>
+  </div>
+</aside>
+
+</div><!-- /create-grid -->
 
 <script>
-const S = { assembly: null, session_id: '', chosen: null, beats: [], drafts: [], lastOptions: null };
+const S = { assembly: null, session_id: '', chosen: null, beats: [], drafts: [],
+            lastOptions: null, stage: -1, modelLabel: '-' };
+const STAGES = ['装配', '立意', '拍子', '生成', '门禁', '交付'];
 const $ = id => document.getElementById(id);
 async function post(url, body) {
   const r = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -67,20 +94,60 @@ async function post(url, body) {
   if (!r.ok) throw new Error(d.detail || JSON.stringify(d));
   return d;
 }
-async function init() {
-  const d = await (await fetch('/app/api/projects')).json();
-  $('project').innerHTML = d.projects.map(p => `<option value="${p.name}">${p.name}${p.pinned ? '（钉扎：' + p.pinned.pack + ' v' + p.pinned.version + '）' : ''}</option>`).join('');
-  $('pack').innerHTML = d.packs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+async function sse(url, body, onEvent) {
+  const resp = await fetch(url, { method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+  if (!resp.ok || !resp.body) {
+    const d = await resp.json().catch(() => ({}));
+    throw new Error(d.detail || ('HTTP ' + resp.status));
+  }
+  const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream: true});
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const chunk = buf.slice(0, idx); buf = buf.slice(idx + 2);
+      let ev = 'message', data = '';
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('event:')) ev = line.slice(6).trim();
+        else if (line.startsWith('data:')) data += line.slice(5).trim();
+      }
+      if (data) { try { onEvent(ev, JSON.parse(data)); } catch (e) {} }
+    }
+  }
+}
+function setStage(i) {
+  S.stage = Math.max(S.stage, i);
+  $('stagebar').innerHTML = STAGES.map((name, k) =>
+    `<span class="stage ${k < S.stage ? 'done' : ''} ${k === S.stage ? 'cur' : ''}">${name}</span>`).join('');
+}
+function updateMeta() {
+  $('genmeta').textContent = `模型：${S.modelLabel}｜目标正文 ≈ ${targetChars() || '未设'} 字`;
 }
 function keywords() { return $('keywords').value.split(/[、,，]/).map(s => s.trim()).filter(Boolean); }
 function tierChange() {
   const custom = $('char_tier').value === 'custom';
   $('target_chars').style.display = custom ? '' : 'none';
   if (!custom) $('target_chars').value = $('char_tier').value;
+  updateMeta();
 }
 function targetChars() {
   const n = +$('target_chars').value || 0;
   return n >= 300 && n <= 20000 ? n : 0;
+}
+async function init() {
+  setStage(-1);
+  const d = await (await fetch('/app/api/projects')).json();
+  $('project').innerHTML = d.projects.map(p => `<option value="${p.name}">${p.name}${p.pinned ? '（钉扎：' + p.pinned.pack + ' v' + p.pinned.version + '）' : ''}</option>`).join('');
+  $('pack').innerHTML = d.packs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  try {
+    const c = await (await fetch('/app/api/config')).json();
+    const w = (c.routing || {}).write || {};
+    S.modelLabel = (w.provider || '?') + '/' + (w.model || '未配置');
+  } catch (e) {}
+  updateMeta();
 }
 async function doAssemble() {
   S.req = { project: $('project').value, pack: $('pack').value,
@@ -98,6 +165,7 @@ async function doAssemble() {
     <p class="meta">合计 ${S.assembly.total_chars} 字 ≈ ${S.assembly.total_est_tokens} token / 预算 ${S.assembly.budget_tokens}
     ${S.assembly.within_budget ? '✓ 预算内' : '⚠ 超预算（记忆项已裁）'}｜目标正文 ≈ ${targetChars() || '未设'} 字</p>`;
   $('step_outline').style.display = '';
+  setStage(0);
   $('options').innerHTML = '<p class="meta">点「生成候选」让写作模型按 thought.md 立意动作提 2–3 个方向。</p><button class="btn" onclick="doOutline()">生成候选</button>';
 }
 async function doOutline() {
@@ -111,6 +179,7 @@ async function doOutline() {
       `<label style="display:block;margin:6px 0"><input type="radio" name="opt" value="${i}" ${i === rec ? 'checked' : ''} onchange="pickOption(${i})">
        <strong>${o.title}</strong>｜${o.angle}<br><span class="meta">动作：${o.action}｜姿态：${o.stance}</span></label>`).join('');
     pickOption(rec);
+    setStage(1);
   } catch (e) {
     $('options').innerHTML = `<p style="color:var(--bad)">${e.message}</p>
       <p class="meta">可在下方"已选方向"里照格式手写（或修好截断的 JSON）后直接锁定；也可点"重新生成候选"重试。</p>`;
@@ -144,7 +213,9 @@ function renderBeats(tone, anchor) {
      <textarea rows="2" style="margin-top:6px;width:100%" oninput="S.beats[${b.no - 1}].beat = this.value">${(b.beat || '').replace(/</g, '&lt;')}</textarea>
      <button class="btn ghost" onclick="reroll(${b.no})">重掷此拍</button></div>`).join('');
   $('tone_note').value = tone; $('canon_anchor').value = anchor;
-  $('step_drafts').style.display = '';
+  $('btn_generate').disabled = false;
+  $('gen_out').textContent = '拍子就绪，可生成正文。';
+  setStage(2);
 }
 async function reroll(no) {
   try {
@@ -154,47 +225,127 @@ async function reroll(no) {
     S.beats[no - 1] = d.beat; renderBeats($('tone_note').value, $('canon_anchor').value);
   } catch (e) { alert(e.message); }
 }
-async function doGenerate() {
-  $('gen_out').textContent = '生成中（多稿串行，勿关页）……';
-  try {
-    const d = await post('/app/api/generate', {...S.req, title: $('title').value,
-      chosen: S.chosen, beats: S.beats, tone_note: $('tone_note').value,
-      canon_anchor: $('canon_anchor').value, target_chars: targetChars(),
-      n_drafts: +$('n_drafts').value, session_id: S.session_id });
-    S.session_id = d.session_id; S.drafts = d.drafts;
-    $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
-    renderDrafts();
-  } catch (e) { $('gen_out').textContent = '失败：' + e.message; }
+// ---- 生成现场（流式优先，可回退整段）----
+function cardHtml(dr, i) {
+  const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
+  const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
+  const n = (dr.text || '').length;
+  const emptyMark = n ? `｜正文 ${n} 字`
+    : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
+  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${badge}
+    <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>
+    <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
+    <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
+    <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
+    <span id="end_${i}" class="meta"></span></div>`;
+}
+function refreshPick() {
+  $('pick').innerHTML = S.drafts.map((d, i) =>
+    d ? `<option value="${i}">稿 ${i + 1}</option>` : '').join('');
+  $('savebox').style.display = S.drafts.some(d => d) ? '' : 'none';
 }
 function renderDrafts() {
-  $('drafts').innerHTML = S.drafts.map((dr, i) => {
-    const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
-    const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
-    const n = (dr.text || '').length;
-    const emptyMark = n ? `｜正文 ${n} 字`
-      : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
-    return `<div class="panel"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${badge}
-      <div class="passage" style="max-height:340px;overflow:auto">${(dr.text || '').replace(/</g, '&lt;')}</div>
-      <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
-      <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
-      <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
-      <span id="end_${i}" class="meta"></span></div>`;
-  }).join('');
-  $('pick').innerHTML = S.drafts.map((_, i) => `<option value="${i}">稿 ${i + 1}</option>`).join('');
+  $('drafts').innerHTML = S.drafts.map((dr, i) =>
+    dr ? cardHtml(dr, i) : '').join('');
+  refreshPick();
+}
+function streamCardHtml(i) {
+  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（生成中<span id="live_${i}" class="meta">……</span>）
+    <div class="passage streambox" id="box_${i}"></div></div>`;
+}
+function appendStream(i, text) {
+  const box = $('box_' + i);
+  if (!box) return;
+  box.appendChild(document.createTextNode(text));
+  box.scrollTop = box.scrollHeight;
+}
+async function doGenerate() {
+  if (!S.beats.length) return alert('先完成拍子表');
+  $('btn_generate').disabled = true;
+  $('gen_out').textContent = '连接中……';
+  $('drafts').innerHTML = ''; $('savebox').style.display = 'none';
+  S.drafts = [];
+  setStage(3);
+  const body = {...S.req, title: $('title').value, chosen: S.chosen,
+    beats: S.beats, tone_note: $('tone_note').value,
+    canon_anchor: $('canon_anchor').value, target_chars: targetChars(),
+    n_drafts: +$('n_drafts').value, session_id: S.session_id };
+  try {
+    if ($('use_stream').checked) {
+      await sse('/app/api/generate_stream', body, onGenEvent);
+    } else {
+      const d = await post('/app/api/generate', body);
+      S.session_id = d.session_id; S.drafts = d.drafts;
+      $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
+      renderDrafts(); setStage(4);
+    }
+  } catch (e) { $('gen_out').textContent = '失败：' + e.message; }
+  $('btn_generate').disabled = false;
+}
+function onGenEvent(ev, d) {
+  if (ev === 'session') {
+    S.session_id = d.session_id; S.modelLabel = d.model || S.modelLabel;
+    updateMeta();
+  } else if (ev === 'draft_start') {
+    S.drafts[d.index] = null;
+    $('drafts').insertAdjacentHTML('beforeend', streamCardHtml(d.index));
+    $('gen_out').textContent = `稿 ${d.index + 1} 生成中……`;
+  } else if (ev === 'delta') {
+    appendStream(d.index, d.text);
+    const live = $('live_' + d.index);
+    if (live) live.textContent = `……已生成 ${d.chars} 字`;
+  } else if (ev === 'reasoning') {
+    const live = $('live_' + d.index);
+    if (live) live.textContent = '……模型思考中（reasoning）';
+  } else if (ev === 'status') {
+    $('gen_out').textContent = d.message;
+  } else if (ev === 'draft_done') {
+    S.drafts[d.index] = { text: d.text, usage: d.usage,
+      fp_check: d.fp_check, borrow_check: d.borrow_check };
+    const card = $('card_' + d.index);
+    if (card) card.outerHTML = cardHtml(S.drafts[d.index], d.index);
+    refreshPick(); setStage(4);  // 只换本稿卡片——别稿可能仍在流式，不得全量重绘
+  } else if (ev === 'error') {
+    $('gen_out').textContent = '失败：' + d.message;
+  } else if (ev === 'all_done') {
+    if (!S.drafts.some(x => x)) return;
+    $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
+  }
 }
 async function reviseDraft(i) {
   const d = S.drafts[i];
-  if (!(d.text || '').trim()) return alert('空稿无需修订——请重新生成正文（若反复为空，多半是思考型模型耗尽了 max_tokens，见修订/生成报错提示）');
+  if (!(d.text || '').trim()) return alert('空稿无需修订——请重新生成正文（若反复为空，多半是思考型模型耗尽了 max_tokens，见报错提示）');
+  if (!confirm(`按报告修订会重写稿 ${i + 1} 的语言层（结构/立意/收尾保留），继续？`)) return;
+  const body = {...S.req, title: $('title').value, chosen: S.chosen || {},
+    beats: S.beats, text: d.text,
+    reports: { fp_check: d.fp_check, borrow_check: d.borrow_check, ending: d.ending || null },
+    revision: d.revision || 0, target_chars: targetChars(), session_id: S.session_id };
+  const card = $('card_' + i);
+  if (card) card.innerHTML = `<strong>稿 ${i + 1}</strong>（修订生成中<span class="meta">……</span>）
+    <div class="passage streambox" id="rbox_${i}"></div>`;
   try {
-    const r = await post('/app/api/revise', {...S.req, title: $('title').value,
-      chosen: S.chosen || {}, beats: S.beats, text: d.text,
-      reports: { fp_check: d.fp_check, borrow_check: d.borrow_check, ending: d.ending || null },
-      revision: d.revision || 0, target_chars: targetChars(), session_id: S.session_id });
-    S.session_id = r.session_id;
-    S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
-                    borrow_check: r.borrow_check, revision: r.revision, ending: null };
-    renderDrafts();
-  } catch (e) { alert('修订失败：' + e.message); }
+    if ($('use_stream').checked) {
+      await sse('/app/api/revise_stream', body, (ev, r) => {
+        if (ev === 'session') S.session_id = r.session_id;
+        else if (ev === 'delta') appendStream(i, r.text);
+        else if (ev === 'status' || ev === 'error') {
+          $('gen_out').textContent = r.message;
+          if (ev === 'error') renderDrafts();  // 恢复卡片原状
+        }
+        else if (ev === 'revised_done') {
+          S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
+                          borrow_check: r.borrow_check, revision: r.revision, ending: null };
+          renderDrafts(); setStage(4);
+        }
+      });
+    } else {
+      const r = await post('/app/api/revise', body);
+      S.session_id = r.session_id;
+      S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
+                      borrow_check: r.borrow_check, revision: r.revision, ending: null };
+      renderDrafts();
+    }
+  } catch (e) { alert('修订失败：' + e.message); renderDrafts(); }
 }
 async function endingCheck(i) {
   $('end_' + i).textContent = '判官检查中……';
@@ -210,15 +361,18 @@ async function endingCheck(i) {
 }
 async function doSave() {
   const i = +$('pick').value;
-  if (!(S.drafts[i].text || '').trim()) return alert('草稿为空，拒绝交付——请重新生成');
+  const d = S.drafts[i];
+  if (!d) return alert('还没有可交付的稿');
+  if (!(d.text || '').trim()) return alert('草稿为空，拒绝交付——请重新生成');
   if (!$('title').value.trim() && !confirm('章节题为空，将保存为「未命名」，继续？')) return;
-  const d = await post('/app/api/save', {...S.req, title: $('title').value,
-    text: S.drafts[i].text, chosen: S.chosen || {}, beats: S.beats,
+  const r = await post('/app/api/save', {...S.req, title: $('title').value,
+    text: d.text, chosen: S.chosen || {}, beats: S.beats,
     tone_note: $('tone_note').value, canon_anchor: $('canon_anchor').value,
-    checks: { fp_check: S.drafts[i].fp_check, borrow_check: S.drafts[i].borrow_check,
-              ending: S.drafts[i].ending || null },
-    usage: S.drafts[i].usage, target_chars: targetChars(), session_id: S.session_id });
-  $('save_out').innerHTML = `已交付 ✓ ${d.manuscript}｜会话已存 sessions/（可复判）`;
+    checks: { fp_check: d.fp_check, borrow_check: d.borrow_check,
+              ending: d.ending || null },
+    usage: d.usage, target_chars: targetChars(), session_id: S.session_id });
+  $('save_out').innerHTML = `已交付 ✓ ${r.manuscript}｜会话已存 sessions/（可复判）`;
+  setStage(5);
 }
 init();
 </script>

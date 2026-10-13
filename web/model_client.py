@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 
 
@@ -88,6 +90,90 @@ def chat(base_url: str, api_key: str | None, model: str, messages: list[dict],
         budget *= 2
     return {"text": text, **acc, "model": data.get("model") or model,
             "finish_reason": finish, "retries": retries}
+
+
+_CPT = 0.75  # 1 字 ≈ 0.75 token（与 assemble.CHARS_PER_TOKEN 同口径）
+
+
+def chat_stream(base_url: str, api_key: str | None, model: str, messages: list[dict],
+                temperature: float = 0.8, max_tokens: int = 3500,
+                timeout: float = 240.0):
+    """流式对话（SSE）。逐事件产出：
+      {"type": "delta", "text": 增量正文}
+      {"type": "reasoning", "text": 思考增量}  # 仅供"思考中"状态展示，不入正文
+      {"type": "done", "usage": {...}, "finish_reason": ...}
+    供应商不认 stream_options 时自动裸流重试；usage 缺失按字数粗估（estimated）。
+    读超时按 chunk 间隔计——长文生成不再被"整段等待"掐断（v0.6.4）。
+    """
+    base = dict(model=model, messages=messages, temperature=temperature,
+                max_tokens=max_tokens, stream=True)
+    variants = [ {**base, "stream_options": {"include_usage": True}}, dict(base)]
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    text_parts: list[str] = []
+    finish = None
+    usage = None
+    last_err: Exception | None = None
+    for cand in _candidates(base_url, "/chat/completions"):
+        for payload in variants:
+            opened = False
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    with client.stream("POST", cand, json=payload,
+                                       headers=headers) as resp:
+                        if resp.status_code == 404:
+                            last_err = httpx.HTTPStatusError(
+                                "404", request=resp.request, response=resp)
+                            break  # 下一候选（/v1 回退）
+                        resp.raise_for_status()
+                        opened = True
+                        for line in resp.iter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            obj = json.loads(data)
+                            if obj.get("usage"):
+                                usage = obj["usage"]
+                            choices = obj.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            if delta.get("reasoning_content"):
+                                yield {"type": "reasoning",
+                                       "text": delta["reasoning_content"]}
+                            if delta.get("content"):
+                                text_parts.append(delta["content"])
+                                yield {"type": "delta", "text": delta["content"]}
+                            if choices[0].get("finish_reason"):
+                                finish = choices[0]["finish_reason"]
+                u = usage or {}
+                got = {"prompt_tokens": int(u.get("prompt_tokens") or 0),
+                       "completion_tokens": int(u.get("completion_tokens") or 0)}
+                if not got["prompt_tokens"] and not got["completion_tokens"]:
+                    est_in = sum(len(m.get("content") or "") for m in messages)
+                    got = {"prompt_tokens": int(est_in * _CPT),
+                           "completion_tokens":
+                               int(len("".join(text_parts)) * _CPT),
+                           "estimated": True}
+                yield {"type": "done", "usage": got, "finish_reason": finish}
+                return
+            except httpx.HTTPStatusError as exc:
+                if not opened and exc.response.status_code == 400 \
+                        and "stream_options" in payload:
+                    last_err = exc
+                    continue  # 裸流兜底
+                try:
+                    body_txt = exc.response.text[:300]
+                except Exception:
+                    body_txt = ""
+                raise ValueError(f"模型端点返回 {exc.response.status_code}："
+                                 f"{_sanitize(body_txt, api_key)}") from exc
+            except (httpx.HTTPError, json.JSONDecodeError, KeyError,
+                    TypeError) as exc:
+                last_err = exc
+                break  # 网络层失败 → 下一候选
+    raise ValueError(f"模型流式调用失败：{_sanitize(str(last_err), api_key)}")
 
 
 def list_models(base_url: str, api_key: str | None, timeout: float = 30.0) -> list[str]:
