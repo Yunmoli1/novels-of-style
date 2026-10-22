@@ -11,16 +11,25 @@
   .stage.cur{color:#10131a;background:var(--accent);font-weight:600}
   .streambox{max-height:46vh;overflow:auto}
   .genrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .chip{cursor:pointer}
+  .chip .act{font-size:11.5px;margin-left:6px}
+  .chip .act a{color:var(--muted)}
   @media (max-width:1180px){.create-grid{grid-template-columns:1fr}#gen_sidebar{position:static;max-height:none}}
 </style>
 <h1>创作 · 正文环</h1>
 <p class="meta">状态机：装配预览 → 立意确认 → 拍子表 → 生成（右侧栏，流式逐字）→ 三道门 → 确认交付。fp_check/borrow_check 是 advisory 报告不是门；收尾检查为思想层硬性条目，交付前必看。</p>
 
+<div class="panel">
+  <strong>方案槽</strong>
+  <span class="meta">每次「装配预览」自动入槽（5 槽环形，同配置复用原槽；🔒 锁定不被挤掉）。点芯片切回方案：重放装配不花钱，立意/拍子/上次稿一并回填。</span>
+  <div id="slotchips" class="genrow" style="margin-top:6px"></div>
+</div>
+
 <div class="create-grid">
 <div><!-- 左列：步骤流 -->
 
 <div class="panel">
-  <label>项目 <select id="project" onchange="loadPresets()"></select></label>
+  <label>项目 <select id="project" onchange="S.activeSlot = null; loadPresets(); loadSlots()"></select></label>
   <label>风格包 <select id="pack" onchange="loadPresets()"></select></label>
   <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
   <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
@@ -53,7 +62,7 @@
 <div id="step_beats" style="display:none">
 <h2>第二级 · 拍子表</h2>
 <div class="panel" id="beats"></div>
-<p class="meta">拍子确认后 → 到右侧「生成现场」生成正文（流式逐字，可继续编辑拍子后重生成）。</p>
+<p class="meta">拍子确认后 → 到右侧「生成现场」生成正文（同一方案可连生多批对比，保留最近 5 批）。</p>
 </div>
 
 </div><!-- /左列 -->
@@ -85,10 +94,13 @@
 </div><!-- /create-grid -->
 
 <script>
-const S = { assembly: null, session_id: '', chosen: null, beats: [], drafts: [],
-            lastOptions: null, stage: -1, modelLabel: '-' };
+const S = { assembly: null, session_id: '', chosen: null, beats: [],
+            drafts: [], lastOptions: null, stage: -1, modelLabel: '-',
+            slots: [], activeSlot: null, packVersions: {},
+            batchNo: 0, batchStart: 0 };
 const STAGES = ['装配', '立意', '拍子', '生成', '门禁', '交付'];
 const $ = id => document.getElementById(id);
+const esc = s => (s || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 async function post(url, body) {
   const r = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/json'},
                                body: JSON.stringify(body) });
@@ -143,6 +155,8 @@ async function init() {
   setStage(-1);
   const d = await (await fetch('/app/api/projects')).json();
   $('project').innerHTML = d.projects.map(p => `<option value="${p.name}">${p.name}${p.pinned ? '（钉扎：' + p.pinned.pack + ' v' + p.pinned.version + '）' : ''}</option>`).join('');
+  S.packVersions = {};
+  (d.packs || []).forEach(p => S.packVersions[p.name] = p.version || '');
   $('pack').innerHTML = d.packs.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
   try {
     const c = await (await fetch('/app/api/config')).json();
@@ -151,34 +165,152 @@ async function init() {
   } catch (e) {}
   updateMeta();
   loadPresets();
+  loadSlots();
+}
+// ---- 方案槽 ----
+async function loadSlots() {
+  try {
+    const p = $('project').value;
+    if (!p) { S.slots = []; renderSlots(); return; }
+    const d = await (await fetch('/app/api/slots?project=' + encodeURIComponent(p))).json();
+    S.slots = d.slots || [];
+    renderSlots();
+  } catch (e) {}
+}
+function slotLabel(s) {
+  return s.name || (s.chosen && s.chosen.title) || s.title || `章${s.chapter_no}`;
+}
+function renderSlots() {
+  $('slotchips').innerHTML = S.slots.map((s, idx) => {
+    const i = idx + 1;
+    if (!s) return `<span class="stage" style="opacity:.35">槽${i}（空）</span>`;
+    const cur = S.activeSlot === i ? ' cur' : '';
+    const tip = `章${s.chapter_no}${s.title ? '《' + s.title + '》' : ''}｜包 ${s.pack} v${s.pack_version || '?'}｜关键词：${(s.keywords || []).join('、') || '无'}`;
+    return `<span class="stage${cur} chip" onclick="loadSlot(${i})" title="${esc(tip)}">槽${i} ${s.locked ? '🔒' : ''}·${esc(slotLabel(s))}`
+      + `<span class="act" onclick="event.stopPropagation()">`
+      + `<a href="javascript:void(0)" onclick="toggleLock(${i})">${s.locked ? '解锁' : '锁定'}</a>｜`
+      + `<a href="javascript:void(0)" onclick="nameSlot(${i})">名</a>｜`
+      + `<a href="javascript:void(0)" onclick="clearSlot(${i})">清</a></span></span>`;
+  }).join('');
+}
+async function captureSlot() {
+  try {
+    const d = await post('/app/api/slots/capture', {
+      project: $('project').value, pack: $('pack').value,
+      chapter_no: +$('chapter_no').value, keywords: keywords(),
+      target_chars: targetChars(), title: $('title').value });
+    S.activeSlot = d.slot.id;
+    await loadSlots();
+  } catch (e) { alert(e.message); }
+}
+async function slotPatch(i, fields) {
+  if (!i) return;
+  try {
+    const d = await post('/app/api/slots/update',
+      { project: $('project').value, slot_id: i, ...fields });
+    if (S.slots[i - 1]) S.slots[i - 1] = d.slot;
+    renderSlots();
+  } catch (e) {}
+}
+async function toggleLock(i) {
+  const s = S.slots[i - 1];
+  if (s) await slotPatch(i, { locked: !s.locked });
+}
+async function nameSlot(i) {
+  const s = S.slots[i - 1];
+  if (!s) return;
+  const n = prompt('方案名（留空清除，自动名取立意方向）：', s.name || '');
+  if (n === null) return;
+  await slotPatch(i, { name: n.trim() });
+}
+async function clearSlot(i) {
+  if (!confirm(`清空方案槽 ${i}？（对应配置与上次稿将被删除）`)) return;
+  try {
+    await post('/app/api/slots/clear', { project: $('project').value, slot_id: i });
+    if (S.activeSlot === i) S.activeSlot = null;
+    await loadSlots();
+  } catch (e) { alert(e.message); }
+}
+async function loadSlot(i) {
+  const s = S.slots[i - 1];
+  if (!s) return;
+  S.activeSlot = i;
+  S.drafts = []; S.batchNo = 0;
+  $('drafts').innerHTML = ''; $('savebox').style.display = 'none';
+  $('gen_out').textContent = '';
+  $('project').value = s.project; $('pack').value = s.pack;
+  $('chapter_no').value = s.chapter_no; $('title').value = s.title || '';
+  $('keywords').value = (s.keywords || []).join('、');
+  const tc = s.target_chars || 0;
+  const tiers = ['1500', '2500', '4000', '6000'];
+  if (tc && tiers.includes(String(tc))) {
+    $('char_tier').value = String(tc); $('target_chars').style.display = 'none';
+  } else {
+    $('char_tier').value = 'custom'; $('target_chars').style.display = '';
+  }
+  $('target_chars').value = tc || 2500;
+  updateMeta();
+  S.req = { project: s.project, pack: s.pack, chapter_no: s.chapter_no,
+            keywords: s.keywords || [], target_chars: tc };
+  try {
+    S.assembly = await post('/app/api/assemble', S.req);
+    renderAssembly();
+    setStage(0);
+    $('step_outline').style.display = '';
+    $('options').innerHTML = '<p class="meta">方案已恢复（装配重放完成）。可直接锁定原立意，或「生成候选」重提方向。</p>'
+      + '<button class="btn" onclick="doOutline()">生成候选</button>';
+  } catch (e) { alert('装配重放失败：' + e.message); return; }
+  if (s.chosen) {
+    S.chosen = s.chosen;
+    $('chosen_json').value = JSON.stringify(s.chosen, null, 2);
+    setStage(1);
+  }
+  if (s.beats && s.beats.length) {
+    S.beats = s.beats;
+    $('step_beats').style.display = '';
+    renderBeats(s.tone_note || '不指定', s.canon_anchor || '无');
+  }
+  if (s.latest_draft && s.latest_draft.text) {
+    S.drafts = [{ ...s.latest_draft, batch: 0, label: '上次稿' }];
+    renderDrafts();
+  }
+  const curV = S.packVersions[s.pack];
+  if (s.pack_version && curV && curV !== s.pack_version)
+    $('gen_out').textContent = `⚠ 包已从 v${s.pack_version} 升到 v${curV}，装配内容可能随包更新变化`;
+  renderSlots();
 }
 async function loadPresets() {
   try {
     const q = 'project=' + encodeURIComponent($('project').value || '')
             + '&pack=' + encodeURIComponent($('pack').value || '');
     const p = await (await fetch('/app/api/presets?' + q)).json();
-    $('tone_list').innerHTML = (p.tones || []).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
-    $('anchor_list').innerHTML = (p.anchors || []).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+    $('tone_list').innerHTML = (p.tones || []).map(t => `<option value="${esc(t)}">`).join('');
+    $('anchor_list').innerHTML = (p.anchors || []).map(t => `<option value="${esc(t)}">`).join('');
   } catch (e) {}
 }
+// ---- 步骤流 ----
 async function doAssemble() {
   S.req = { project: $('project').value, pack: $('pack').value,
     chapter_no: +$('chapter_no').value, keywords: keywords(),
     target_chars: targetChars() };
   S.assembly = await post('/app/api/assemble', S.req);
+  renderAssembly();
+  $('step_outline').style.display = '';
+  setStage(0);
+  $('options').innerHTML = '<p class="meta">点「生成候选」让写作模型按 thought.md 立意动作提 2–3 个方向。</p><button class="btn" onclick="doOutline()">生成候选</button>';
+  captureSlot();  // 装配成功自动入槽（同配置复用原槽）
+}
+function renderAssembly() {
   const rows = S.assembly.items.map(i =>
     `<tr${i.dropped ? ' style="opacity:.4"' : ''}><td>${i.kind}</td><td>${i.source}</td>
      <td>${i.chars}</td><td>${i.est_tokens}${i.dropped ? '（预算裁掉）' : ''}</td>
-     <td style="max-width:340px">${i.excerpt.replace(/</g, '&lt;')}</td></tr>`).join('');
+     <td style="max-width:340px">${esc(i.excerpt)}</td></tr>`).join('');
   $('assembly').style.display = '';
   $('assembly').innerHTML = `<h3>装配预览（所见即所发）</h3>
     <table><thead><tr><th>类型</th><th>来源</th><th>字数</th><th>token 估算</th><th>摘录</th></tr></thead>
     <tbody>${rows}</tbody></table>
     <p class="meta">合计 ${S.assembly.total_chars} 字 ≈ ${S.assembly.total_est_tokens} token / 预算 ${S.assembly.budget_tokens}
     ${S.assembly.within_budget ? '✓ 预算内' : '⚠ 超预算（记忆项已裁）'}｜目标正文 ≈ ${targetChars() || '未设'} 字</p>`;
-  $('step_outline').style.display = '';
-  setStage(0);
-  $('options').innerHTML = '<p class="meta">点「生成候选」让写作模型按 thought.md 立意动作提 2–3 个方向。</p><button class="btn" onclick="doOutline()">生成候选</button>';
 }
 async function doOutline() {
   $('options').innerHTML = '<p class="meta">模型生成中……</p>';
@@ -206,6 +338,7 @@ function lockChosen() {
   catch (e) { return alert('已选方向不是合法 JSON'); }
   $('step_beats').style.display = '';
   $('beats').innerHTML = '<p class="meta">点「生成拍子表」。</p><button class="btn" onclick="doBeats()">生成拍子表</button>';
+  slotPatch(S.activeSlot, { chosen: S.chosen });
 }
 async function doBeats() {
   $('beats').innerHTML = '<p class="meta">模型生成中……</p>';
@@ -222,12 +355,13 @@ async function doBeats() {
 function renderBeats(tone, anchor) {
   $('beats').innerHTML = S.beats.map(b =>
     `<div class="panel"><strong>拍${b.no}</strong>
-     <textarea rows="2" style="margin-top:6px;width:100%" oninput="S.beats[${b.no - 1}].beat = this.value">${(b.beat || '').replace(/</g, '&lt;')}</textarea>
+     <textarea rows="2" style="margin-top:6px;width:100%" oninput="S.beats[${b.no - 1}].beat = this.value">${esc(b.beat)}</textarea>
      <button class="btn ghost" onclick="reroll(${b.no})">重掷此拍</button></div>`).join('');
   $('tone_note').value = tone; $('canon_anchor').value = anchor;
   $('btn_generate').disabled = false;
   $('gen_out').textContent = '拍子就绪，可生成正文。';
   setStage(2);
+  slotPatch(S.activeSlot, { beats: S.beats, tone_note: tone, canon_anchor: anchor });
 }
 async function reroll(no) {
   try {
@@ -237,7 +371,7 @@ async function reroll(no) {
     S.beats[no - 1] = d.beat; renderBeats($('tone_note').value, $('canon_anchor').value);
   } catch (e) { alert(e.message); }
 }
-// ---- 生成现场（流式优先，可回退整段）----
+// ---- 生成现场（草稿按批累积，保留最近 5 批）----
 function cardHtml(dr, i) {
   const gate = rep => rep ? `<pre class="meta" style="white-space:pre-wrap">${(rep.report || '').replace(/</g, '&lt;')}</pre>` : '';
   const badge = dr.revision ? `<span class="meta">｜已按报告修订 ${dr.revision} 轮</span>` : '';
@@ -246,7 +380,7 @@ function cardHtml(dr, i) {
   const n = (dr.text || '').length;
   const emptyMark = n ? `｜正文 ${n} 字`
     : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
-  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${trunc}${badge}
+  return `<div class="panel" id="card_${i}"><strong>${dr.label || '稿'}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${trunc}${badge}
     <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>
     <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
     <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
@@ -255,7 +389,7 @@ function cardHtml(dr, i) {
 }
 function refreshPick() {
   $('pick').innerHTML = S.drafts.map((d, i) =>
-    d ? `<option value="${i}">稿 ${i + 1}</option>` : '').join('');
+    d ? `<option value="${i}">${d.label || '稿'}</option>` : '').join('');
   $('savebox').style.display = S.drafts.some(d => d) ? '' : 'none';
 }
 function renderDrafts() {
@@ -263,12 +397,12 @@ function renderDrafts() {
     dr ? cardHtml(dr, i) : '').join('');
   refreshPick();
 }
-function streamCardHtml(i) {
-  return `<div class="panel" id="card_${i}"><strong>稿 ${i + 1}</strong>（生成中<span id="live_${i}" class="meta">……</span>）
+function streamCardHtml(i, label) {
+  return `<div class="panel" id="card_${i}"><strong>${label}</strong>（生成中<span id="live_${i}" class="meta">……</span>）
     <div class="passage streambox" id="box_${i}"></div></div>`;
 }
 function appendStream(i, text) {
-  const box = $('box_' + i);
+  const box = $('box_' + i) || $('rbox_' + i);
   if (!box) return;
   box.appendChild(document.createTextNode(text));
   box.scrollTop = box.scrollHeight;
@@ -282,12 +416,22 @@ function replaceStream(i, text, chars) {
   const live = $('live_' + i);
   if (live) live.textContent = `……已生成 ${chars} 字`;
 }
+function capBatches() {
+  // 保留最近 5 批：新一批入列前挤掉最旧批
+  while (new Set(S.drafts.filter(d => d).map(d => d.batch)).size >= 5) {
+    const oldest = S.drafts.find(d => d).batch;
+    S.drafts = S.drafts.filter(d => !d || d.batch !== oldest);
+  }
+}
 async function doGenerate() {
   if (!S.beats.length) return alert('先完成拍子表');
+  capBatches();
+  renderDrafts();  // 被挤掉的最旧批卡片同步消失
+  S.batchNo += 1;
+  S.batchStart = S.drafts.length;
   $('btn_generate').disabled = true;
   $('gen_out').textContent = '连接中……';
-  $('drafts').innerHTML = ''; $('savebox').style.display = 'none';
-  S.drafts = [];
+  $('savebox').style.display = 'none';
   setStage(3);
   const body = {...S.req, title: $('title').value, chosen: S.chosen,
     beats: S.beats, tone_note: $('tone_note').value,
@@ -298,56 +442,80 @@ async function doGenerate() {
       await sse('/app/api/generate_stream', body, onGenEvent);
     } else {
       const d = await post('/app/api/generate', body);
-      S.session_id = d.session_id; S.drafts = d.drafts;
+      S.session_id = d.session_id;
+      d.drafts.forEach((dr, k) => {
+        const label = `批${S.batchNo}·稿${k + 1}`;
+        S.drafts[S.batchStart + k] = { ...dr, batch: S.batchNo, label };
+      });
       $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
       renderDrafts(); setStage(4);
+      slotPatch(S.activeSlot, { latest_draft: pickLatest() });
     }
   } catch (e) { $('gen_out').textContent = '失败：' + e.message; }
   $('btn_generate').disabled = false;
+}
+function pickLatest() {
+  const done = S.drafts.filter(d => d && d.text);
+  return done.length ? { text: done[done.length - 1].text,
+    usage: done[done.length - 1].usage, fp_check: done[done.length - 1].fp_check,
+    borrow_check: done[done.length - 1].borrow_check,
+    revision: done[done.length - 1].revision || 0 } : null;
 }
 function onGenEvent(ev, d) {
   if (ev === 'session') {
     S.session_id = d.session_id; S.modelLabel = d.model || S.modelLabel;
     updateMeta();
   } else if (ev === 'draft_start') {
-    S.drafts[d.index] = null;
-    $('drafts').insertAdjacentHTML('beforeend', streamCardHtml(d.index));
-    $('gen_out').textContent = `稿 ${d.index + 1} 生成中……`;
+    const f = S.batchStart + d.index;
+    S.drafts[f] = null;
+    $('drafts').insertAdjacentHTML('beforeend',
+      streamCardHtml(f, `批${S.batchNo}·稿${d.index + 1}`));
+    $('gen_out').textContent = `批${S.batchNo}·稿${d.index + 1} 生成中……`;
   } else if (ev === 'delta') {
-    appendStream(d.index, d.text);
-    const live = $('live_' + d.index);
+    appendStream(S.batchStart + d.index, d.text);
+    const live = $('live_' + (S.batchStart + d.index));
     if (live) live.textContent = `……已生成 ${d.chars} 字`;
   } else if (ev === 'replace') {
-    replaceStream(d.index, d.text, d.chars);
+    replaceStream(S.batchStart + d.index, d.text, d.chars);
   } else if (ev === 'reasoning') {
-    const live = $('live_' + d.index);
+    const live = $('live_' + (S.batchStart + d.index));
     if (live) live.textContent = '……模型思考中（reasoning）';
   } else if (ev === 'status') {
     $('gen_out').textContent = d.message;
   } else if (ev === 'draft_done') {
-    S.drafts[d.index] = { text: d.text, usage: d.usage,
-      fp_check: d.fp_check, borrow_check: d.borrow_check };
-    const card = $('card_' + d.index);
-    if (card) card.outerHTML = cardHtml(S.drafts[d.index], d.index);
-    refreshPick(); setStage(4);  // 只换本稿卡片——别稿可能仍在流式，不得全量重绘
+    const f = S.batchStart + d.index;
+    const label = `批${S.batchNo}·稿${d.index + 1}`;
+    S.drafts[f] = { text: d.text, usage: d.usage, fp_check: d.fp_check,
+                    borrow_check: d.borrow_check, batch: S.batchNo, label };
+    const card = $('card_' + f);
+    if (card) card.outerHTML = cardHtml(S.drafts[f], f);
+    refreshPick(); setStage(4);  // 只换本稿卡片——别稿可能仍在流式
+    slotPatch(S.activeSlot, { latest_draft: pickLatest() });
   } else if (ev === 'error') {
     $('gen_out').textContent = '失败：' + d.message;
   } else if (ev === 'all_done') {
-    if (!S.drafts.some(x => x)) return;
-    $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
+    if (!S.drafts.some(x => x && x.batch === S.batchNo)) return;
+    $('gen_out').textContent = '本批完成——可再点「生成正文」加一批对比，或直接采用交付。';
   }
 }
 async function reviseDraft(i) {
   const d = S.drafts[i];
   if (!(d.text || '').trim()) return alert('空稿无需修订——请重新生成正文（若反复为空，多半是思考型模型耗尽了 max_tokens，见报错提示）');
-  if (!confirm(`按报告修订会重写稿 ${i + 1} 的语言层（结构/立意/收尾保留），继续？`)) return;
+  if (!confirm(`按报告修订会重写【${d.label}】的语言层（结构/立意/收尾保留），继续？`)) return;
   const body = {...S.req, title: $('title').value, chosen: S.chosen || {},
     beats: S.beats, text: d.text,
     reports: { fp_check: d.fp_check, borrow_check: d.borrow_check, ending: d.ending || null },
     revision: d.revision || 0, target_chars: targetChars(), session_id: S.session_id };
   const card = $('card_' + i);
-  if (card) card.innerHTML = `<strong>稿 ${i + 1}</strong>（修订生成中<span class="meta">……</span>）
+  if (card) card.innerHTML = `<strong>${d.label}</strong>（修订生成中<span class="meta">……</span>）
     <div class="passage streambox" id="rbox_${i}"></div>`;
+  const apply = r => {
+    S.drafts[i] = { ...S.drafts[i], text: r.text, usage: r.usage,
+      fp_check: r.fp_check, borrow_check: r.borrow_check,
+      revision: r.revision, ending: null };
+    renderDrafts(); setStage(4);
+    slotPatch(S.activeSlot, { latest_draft: pickLatest() });
+  };
   try {
     if ($('use_stream').checked) {
       await sse('/app/api/revise_stream', body, (ev, r) => {
@@ -357,19 +525,12 @@ async function reviseDraft(i) {
         else if (ev === 'status' || ev === 'error') {
           $('gen_out').textContent = r.message;
           if (ev === 'error') renderDrafts();  // 恢复卡片原状
-        }
-        else if (ev === 'revised_done') {
-          S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
-                          borrow_check: r.borrow_check, revision: r.revision, ending: null };
-          renderDrafts(); setStage(4);
-        }
+        } else if (ev === 'revised_done') apply({ ...r, revision: r.revision });
       });
     } else {
       const r = await post('/app/api/revise', body);
       S.session_id = r.session_id;
-      S.drafts[i] = { text: r.text, usage: r.usage, fp_check: r.fp_check,
-                      borrow_check: r.borrow_check, revision: r.revision, ending: null };
-      renderDrafts();
+      apply(r);
     }
   } catch (e) { alert('修订失败：' + e.message); renderDrafts(); }
 }

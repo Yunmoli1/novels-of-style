@@ -455,6 +455,82 @@ class TestWebServer(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertIn("生成现场", r.text)
         self.assertIn("generate_stream", r.text)
+        self.assertIn("方案槽", r.text)  # v0.6.6
+        self.assertIn("loadSlot", r.text)
+
+    def test_slots_capture_update_restore(self):
+        """v0.6.6 方案槽：装配入槽 → 同指纹复用原槽 → 立意/拍子/上次稿写回
+        → 环形驱逐最旧未锁定 → 全锁 409 → 清空后 404。"""
+        cap = {"project": "测试项目", "pack": "luxun", "chapter_no": 2,
+               "keywords": ["大比目鱼"], "target_chars": 1500, "title": "夜谈"}
+        r1 = self.client.post("/app/api/slots/capture", json=cap)
+        self.assertEqual(r1.status_code, 200)
+        self.assertFalse(r1.json()["reused"])
+        sid = r1.json()["slot"]["id"]
+        self.assertTrue(r1.json()["slot"]["pack_version"], "槽未记包版本")
+        r2 = self.client.post("/app/api/slots/capture", json=cap)
+        self.assertTrue(r2.json()["reused"])
+        self.assertEqual(r2.json()["slot"]["id"], sid)
+        u = self.client.post("/app/api/slots/update", json={
+            "project": "测试项目", "slot_id": sid,
+            "chosen": OUTLINE["options"][0], "beats": BEATS["beats"],
+            "tone_note": "不指定", "canon_anchor": "无",
+            "latest_draft": {"text": PROSE, "usage": {}}})
+        self.assertEqual(u.status_code, 200)
+        s = u.json()["slot"]
+        self.assertEqual(s["name"], "方向A", "槽名应自动取立意方向")
+        self.assertEqual(len(s["beats"]), 3)
+        lst = self.client.get("/app/api/slots",
+                              params={"project": "测试项目"}).json()["slots"]
+        self.assertIsNotNone(lst[sid - 1])
+        for k in range(4):  # 填满 5 槽
+            rr = self.client.post("/app/api/slots/capture",
+                                  json={**cap, "keywords": [f"kw{k}"]})
+            self.assertEqual(rr.status_code, 200)
+        for i in range(1, 6):
+            self.client.post("/app/api/slots/update",
+                             json={"project": "测试项目", "slot_id": i,
+                                   "locked": True})
+        full = self.client.post("/app/api/slots/capture",
+                                json={**cap, "keywords": ["fresh"]})
+        self.assertEqual(full.status_code, 409)
+        self.assertIn("解锁", full.json()["detail"])
+        self.client.post("/app/api/slots/update",
+                         json={"project": "测试项目", "slot_id": sid,
+                               "locked": False})
+        ok = self.client.post("/app/api/slots/capture",
+                              json={**cap, "keywords": ["fresh"]})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["slot"]["id"], sid, "应挤掉最旧未锁定槽")
+        self.client.post("/app/api/slots/clear",
+                         json={"project": "测试项目", "slot_id": sid})
+        lst2 = self.client.get("/app/api/slots",
+                               params={"project": "测试项目"}).json()["slots"]
+        self.assertIsNone(lst2[sid - 1])
+        u2 = self.client.post("/app/api/slots/update",
+                              json={"project": "测试项目", "slot_id": sid,
+                                    "locked": True})
+        self.assertEqual(u2.status_code, 404)
+        bad = self.client.post("/app/api/slots/update",
+                               json={"project": "测试项目", "slot_id": 9,
+                                     "locked": True})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_slots_traversal_blocked(self):
+        r = self.client.get("/app/api/slots", params={"project": "../stylepacks"})
+        self.assertEqual(r.status_code, 400)
+
+    def test_save_records_keywords(self):
+        """v0.6.6：交付记录带 keywords——历史会话可精确重放装配。"""
+        r = self.client.post("/app/api/save", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 8,
+            "title": "夜谈", "keywords": ["大比目鱼", "泰拉币"], "text": PROSE,
+            "usage": {}})
+        self.assertEqual(r.status_code, 200)
+        recs = list((Path(self.tmp.name) / "ws" / "测试项目"
+                     / "sessions").glob("*.json"))
+        self.assertTrue(any("泰拉币" in p.read_text(encoding="utf-8")
+                            for p in recs), "keywords 未入会话记录")
 
     def test_generation_stream_e2e(self):
         """v0.6.4 流式：SSE 事件齐全、正文逐字到齐、门禁随 draft_done 返回、

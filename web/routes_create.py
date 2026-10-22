@@ -196,12 +196,16 @@ def test_connection(body: TestIn):
 @router.get("/projects")
 def projects():
     cfg = appstate.load_config()
+
+    def _pack_entry(name: str, d: Path) -> dict:
+        return {"name": name, "version": _pack_version(d)}
+
     return {"workspace_root": str(_ws_root(cfg)),
             "projects": appstate.discover_projects(_ws_root(cfg)),
-            "packs": [{"name": d.name} for d in sorted(STYLEPACKS.iterdir())
+            "packs": [_pack_entry(d.name, d) for d in sorted(STYLEPACKS.iterdir())
                       if d.is_dir() and (d / "pack.json").is_file()
                       and d.name != "local"]
-            + ([{"name": f"local/{d.name}"}
+            + ([_pack_entry(f"local/{d.name}", d)
                 for d in sorted(local_dir.iterdir())
                 if d.is_dir() and (d / "pack.json").is_file()]
                if (local_dir := STYLEPACKS / "local").is_dir() else [])}
@@ -262,6 +266,149 @@ def do_assemble(body: AssembleIn):
         body.chapter_no, body.keywords, cfg.get("context_budget_tokens", 24000))
     result.pop("kept_texts", None)  # 预览不外带全文
     return result
+
+
+# ---- 方案槽（v0.6.6）：装配输入可重放，5 槽环形，锁定不被挤掉 ----
+
+def _slots_dir(project_dir: Path) -> Path:
+    d = project_dir / "slots"
+    d.mkdir(parents=True, exist_ok=True)
+    gi = d / ".gitignore"
+    if not gi.is_file():  # 方案含创作配置，防误提交（与 sessions 同款）
+        gi.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
+    return d
+
+
+def _pack_version(pack_dir: Path) -> str:
+    try:
+        return str(json.loads((pack_dir / "pack.json").read_text(encoding="utf-8")
+                              ).get("version") or "")
+    except (OSError, ValueError):
+        return ""
+
+
+def _slot_path(project_dir: Path, slot_id: int) -> Path:
+    sid = int(slot_id)
+    if not 1 <= sid <= 5:
+        raise HTTPException(400, "槽位号须在 1–5")
+    return _slots_dir(project_dir) / f"slot-{sid}.json"
+
+
+def _read_slot(p: Path) -> dict | None:
+    if not p.is_file():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _write_slot(p: Path, data: dict) -> None:
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                 encoding="utf-8", newline="\n")
+
+
+@router.get("/slots")
+def slots_list(project: str):
+    cfg = appstate.load_config()
+    pdir = _project_dir(cfg, project)
+    sd = pdir / "slots"
+    return {"slots": [(_read_slot(sd / f"slot-{i}.json")
+                       if sd.is_dir() else None) for i in range(1, 6)]}
+
+
+class SlotCaptureIn(BaseModel):
+    project: str
+    pack: str
+    chapter_no: int
+    keywords: list[str] = []
+    target_chars: int = 0
+    title: str = ""
+
+
+@router.post("/slots/capture")
+def slot_capture(body: SlotCaptureIn):
+    """装配预览成功后自动入槽：同指纹（项目|包|章|关键词|挡位）更新原槽，
+    否则空槽优先、其次挤掉最旧未锁定槽；全锁且无空 → 409 请解锁。"""
+    cfg = appstate.load_config()
+    pdir = _project_dir(cfg, body.project)
+    pack_dir = _pack_dir(body.pack)
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+    fp = "|".join([body.project, body.pack, str(body.chapter_no),
+                   ",".join(sorted(body.keywords)),
+                   str(_clean_target_chars(body.target_chars))])
+    sd = _slots_dir(pdir)
+    slots = [(_read_slot(sd / f"slot-{i}.json"), i) for i in range(1, 6)]
+    for s, i in slots:
+        if s and s.get("fingerprint") == fp:
+            s["title"], s["ts"] = body.title, now
+            _write_slot(sd / f"slot-{i}.json", s)
+            return {"slot": s, "reused": True}
+    empty = [i for s, i in slots if s is None]
+    if empty:
+        sid = empty[0]
+    else:
+        unlocked = sorted((s.get("ts") or "", i) for s, i in slots
+                          if s and not s.get("locked"))
+        if not unlocked:
+            raise HTTPException(409, "5 个方案槽已满且全部锁定——"
+                                     "请解锁或清空一个方案后再装配")
+        sid = unlocked[0][1]
+    slot = {"id": sid, "fingerprint": fp, "locked": False, "name": "",
+            "ts": now, "project": body.project, "pack": body.pack,
+            "pack_version": _pack_version(pack_dir),
+            "chapter_no": body.chapter_no, "title": body.title,
+            "keywords": body.keywords,
+            "target_chars": _clean_target_chars(body.target_chars),
+            "chosen": None, "beats": [], "tone_note": "", "canon_anchor": "",
+            "latest_draft": None}
+    _write_slot(sd / f"slot-{sid}.json", slot)
+    return {"slot": slot, "reused": False}
+
+
+class SlotUpdateIn(BaseModel):
+    project: str
+    slot_id: int
+    chosen: dict | None = None
+    beats: list[dict] | None = None
+    tone_note: str | None = None
+    canon_anchor: str | None = None
+    latest_draft: dict | None = None
+    name: str | None = None
+    locked: bool | None = None
+
+
+@router.post("/slots/update")
+def slot_update(body: SlotUpdateIn):
+    cfg = appstate.load_config()
+    p = _slot_path(_project_dir(cfg, body.project), body.slot_id)
+    s = _read_slot(p)
+    if not s:
+        raise HTTPException(404, f"槽位 {body.slot_id} 为空——先装配预览入槽")
+    for k in ("chosen", "beats", "tone_note", "canon_anchor",
+              "latest_draft", "name", "locked"):
+        v = getattr(body, k)
+        if v is not None:
+            s[k] = v
+    if s.get("chosen") and not s.get("name"):  # 槽名自动取立意方向
+        s["name"] = str(s["chosen"].get("title") or "")[:24]
+    s["ts"] = datetime.datetime.now().isoformat(timespec="seconds")
+    _write_slot(p, s)
+    return {"slot": s}
+
+
+class SlotClearIn(BaseModel):
+    project: str
+    slot_id: int
+
+
+@router.post("/slots/clear")
+def slot_clear(body: SlotClearIn):
+    cfg = appstate.load_config()
+    p = _slot_path(_project_dir(cfg, body.project), body.slot_id)
+    if p.is_file():
+        p.unlink()
+    return {"ok": True}
 
 
 # ---- 共创与生成 ----
@@ -607,6 +754,7 @@ class SaveIn(BaseModel):
     chapter_no: int
     title: str
     text: str
+    keywords: list[str] = []  # v0.6.6：入记录，历史会话可精确重放装配
     chosen: dict = {}
     beats: list[dict] = []
     tone_note: str = "不指定"
@@ -647,6 +795,7 @@ def do_save(body: SaveIn):
         "tool": "web-create v0.6.5", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
         "chapter_no": body.chapter_no, "title": title,
+        "keywords": body.keywords,
         "target_chars": _clean_target_chars(body.target_chars),
         "chosen": body.chosen, "beats": body.beats,
         "tone_note": body.tone_note, "canon_anchor": body.canon_anchor,
