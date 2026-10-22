@@ -161,7 +161,7 @@ def revise_prompt(chapter_no: int, title: str, beats: list[dict],
     n = len(draft)
     goal = target_chars or n
     length_note = (f"\n- 篇幅纪律：原文约 {n} 字，修订后仍约 {goal} 字、"
-                   f"**不得低于 {int(goal * 0.9)} 字**。")
+                   f"**不得低于 {int(goal * 0.9)} 字，也不得超过 {int(goal * 1.2)} 字**。")
     return f"""请按验收报告修订第 {chapter_no} 章正文（题：《{title}》）。
 
 硬性要求：

@@ -495,7 +495,15 @@ function onGenEvent(ev, d) {
     $('gen_out').textContent = '失败：' + d.message;
   } else if (ev === 'all_done') {
     if (!S.drafts.some(x => x && x.batch === S.batchNo)) return;
-    $('gen_out').textContent = '本批完成——可再点「生成正文」加一批对比，或直接采用交付。';
+    const hot = S.drafts.filter(x => x && x.batch === S.batchNo
+                                    && x.usage && x.usage.retries >= 2);
+    if (hot.length)
+      $('gen_out').innerHTML = `本批完成。⚠ ${esc(hot[0].label)} 经 `
+        + `${hot[0].usage.retries} 次截断重试（消耗 `
+        + `${Math.round((hot[0].usage.completion_tokens || 0) / 1000)}k tokens、`
+        + `耗时约 ×${hot[0].usage.retries + 1}）——建议给写作路由换非思考模型`;
+    else
+      $('gen_out').textContent = '本批完成——可再点「生成正文」加一批对比，或直接采用交付。';
   }
 }
 async function reviseDraft(i) {
@@ -552,6 +560,7 @@ async function doSave() {
   if (!d) return alert('还没有可交付的稿');
   if (!(d.text || '').trim()) return alert('草稿为空，拒绝交付——请重新生成');
   if (!$('title').value.trim() && !confirm('章节题为空，将保存为「未命名」，继续？')) return;
+  if (!d.ending && !confirm('【收尾检查】此稿还没跑、或修订后没重跑（思想层硬性条目）。仍要交付？')) return;
   const r = await post('/app/api/save', {...S.req, title: $('title').value,
     text: d.text, chosen: S.chosen || {}, beats: S.beats,
     tone_note: $('tone_note').value, canon_anchor: $('canon_anchor').value,

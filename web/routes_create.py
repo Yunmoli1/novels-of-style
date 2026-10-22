@@ -792,7 +792,7 @@ def do_save(body: SaveIn):
         gitignore.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
     record = {
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-        "tool": "web-create v0.6.5", "session_id": body.session_id,
+        "tool": "web-create v0.6.7", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
         "chapter_no": body.chapter_no, "title": title,
         "keywords": body.keywords,
