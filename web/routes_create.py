@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""routes_create：创作环与配置的 API（v0.6.5：截断重试/防缩水/预设选项）。
+"""routes_create：创作环与配置的 API（v0.6.8：方案槽 + 会话总账）。
 
 红线落实：
 - GET /app/api/config 永不返回 api_key（sanitize）；
@@ -99,6 +99,12 @@ def _record_usage(session_id: str, usage: dict) -> None:
     s = _sessions.setdefault(session_id, {"tokens": 0, "calls": 0})
     s["tokens"] += usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
     s["calls"] += 1
+
+
+def _session_totals(session_id: str) -> dict:
+    """本章会话累计（所有调用含重试/门禁判官的真实消耗）。"""
+    s = _sessions.get(session_id or "", {})
+    return {"tokens": int(s.get("tokens", 0)), "calls": int(s.get("calls", 0))}
 
 
 def _run_gate(script: str, args: list[str]) -> dict:
@@ -792,7 +798,7 @@ def do_save(body: SaveIn):
         gitignore.write_text("*\n!.gitignore\n", encoding="utf-8", newline="\n")
     record = {
         "ts": datetime.datetime.now().isoformat(timespec="seconds"),
-        "tool": "web-create v0.6.7", "session_id": body.session_id,
+        "tool": "web-create v0.6.8", "session_id": body.session_id,
         "project": body.project, "pack": body.pack,
         "chapter_no": body.chapter_no, "title": title,
         "keywords": body.keywords,
@@ -801,14 +807,19 @@ def do_save(body: SaveIn):
         "tone_note": body.tone_note, "canon_anchor": body.canon_anchor,
         "checks": body.checks, "usage": body.usage,
         "assembly": body.assembly_preview,
+        "session_totals": _session_totals(body.session_id),
         "output_file": target.name, "text": body.text,
     }
     (sessions / f"{time.strftime('%Y%m%d-%H%M%S')}-{body.chapter_no:03d}.json"
      ).write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n",
                   encoding="utf-8", newline="\n")
+    totals = _session_totals(body.session_id)
     appstate.append_cost(project_dir, "web-create",
                          chars=len(body.text), model=str(body.usage.get("model", "")),
                          tokens=(body.usage.get("prompt_tokens", 0)
                                  + body.usage.get("completion_tokens", 0)),
+                         session_tokens=totals["tokens"],
+                         session_calls=totals["calls"],
                          note=f"第{body.chapter_no}章《{title}》")
-    return {"ok": True, "manuscript": str(target), "sessions_dir": str(sessions)}
+    return {"ok": True, "manuscript": str(target), "sessions_dir": str(sessions),
+            "session_totals": totals}

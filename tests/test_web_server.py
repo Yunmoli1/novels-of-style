@@ -337,6 +337,14 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("细雨", record)
         cost = (ws / "style" / "cost.jsonl").read_text(encoding="utf-8")
         self.assertIn("web-create", cost)
+        # v0.6.8：会话总账落盘（cost.jsonl 附加字段 + sessions 记录），不再只记最后一稿
+        entry = json.loads(cost.strip().splitlines()[-1])
+        self.assertIn("session_tokens", entry)
+        self.assertGreaterEqual(entry["session_calls"], 5,
+                                "总账调用次数未含 outline/beats/生成/修订/判官")
+        self.assertGreaterEqual(entry["session_tokens"], entry["tokens"])
+        rec = json.loads(record)
+        self.assertGreaterEqual(rec["session_totals"]["calls"], 5)
 
     def _set_write_route(self, model):
         cfg = appstate.load_config(self.cfg_path)

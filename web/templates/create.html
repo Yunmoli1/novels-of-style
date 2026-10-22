@@ -567,7 +567,10 @@ async function doSave() {
     checks: { fp_check: d.fp_check, borrow_check: d.borrow_check,
               ending: d.ending || null },
     usage: d.usage, target_chars: targetChars(), session_id: S.session_id });
-  $('save_out').innerHTML = `已交付 ✓ ${r.manuscript}｜会话已存 sessions/（可复判）`;
+  $('save_out').innerHTML = `已交付 ✓ ${r.manuscript}｜会话已存 sessions/（可复判）`
+    + (r.session_totals && r.session_totals.tokens
+      ? `｜本章累计 ${Math.round(r.session_totals.tokens / 1000)}k tokens / ${r.session_totals.calls} 次调用`
+      : '');
   setStage(5);
 }
 init();

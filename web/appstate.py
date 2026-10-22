@@ -119,14 +119,20 @@ def list_chapters(project_dir: Path) -> list[dict]:
 
 
 def append_cost(project_dir: Path, skill: str, chars: int,
-                model: str = "", tokens: int = 0, note: str = "") -> dict:
-    """与 cost.py 同账本同文件（style/cost.jsonl）；模型调用加 model/tokens 附加字段。"""
+                model: str = "", tokens: int = 0, note: str = "",
+                session_tokens: int = 0, session_calls: int = 0) -> dict:
+    """与 cost.py 同账本同文件（style/cost.jsonl）；模型调用加 model/tokens
+    附加字段；session_tokens/session_calls = 本章会话真实总消耗/调用次数
+    （tokens 只记交付稿最后一次调用——v0.6.8 起总账单独成字段，不再低估）。"""
     entry = {
         "date": datetime.date.today().isoformat(),
         "skill": skill, "chars": int(chars), "files": 1,
         "model": model, "tokens": int(tokens),
         "note": note or "web 工作台模型调用",
     }
+    if session_tokens:
+        entry["session_tokens"] = int(session_tokens)
+        entry["session_calls"] = int(session_calls)
     if "tokens" in entry and entry["tokens"]:
         entry["chars"] = entry["chars"] or int(entry["tokens"] * 2)  # 折算口径：2 字/token（中文）
     cost = project_dir / "style" / "cost.jsonl"

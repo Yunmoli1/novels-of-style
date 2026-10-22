@@ -2,6 +2,18 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.6.8] - 2026-10-23
+
+### Fixed
+- **消耗账目修复**（用户"消费变高"排查的收尾）：cost.jsonl 此前只记交付稿
+  最后一次调用的 tokens，修订中间批/判官等消耗被低估——新增
+  session_tokens/session_calls 字段（本章会话所有调用的真实总账），
+  sessions 记录同步带 session_totals；交付完成行显示"本章累计 XXk tokens /
+  N 次调用"
+
+### Changed
+- dist 重打至 v0.6.8（此前停在 v0.5.1）
+
 ## [0.6.7] - 2026-10-23
 
 ### Changed
