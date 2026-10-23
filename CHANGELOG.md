@@ -2,6 +2,22 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.8.0] - 2026-10-24
+
+### Added
+- **蒸馏台盲测验收闭环**（style-calibrate 技能网页化；步 ⑤.5）：
+  新蒸馏的包从此在网页上即可完成质量度量——"产出包 → 测出胜率"不再断链
+  - /blind/start（job 化）：无题库先按文风档案出 3 道盲测题（写入
+    tests/blind-prompts.md，可在校订编辑器改）；每题**带包/裸各生成一段**
+    （带包臂注入 card+profile+lexicon+limits 档案上下文），随机打乱甲乙
+  - /blind/session 判读视图：只给甲/乙文本与期望特征 checklist——
+    **绝不外带 packed 标记**（防泄漏，测试锁死）；网页上选"更像作者的是
+    甲/乙/都不像"，逐轮判完揭示答案与胜率
+  - 胜率自动入 evals/calibration.json（web_blind_<包>_<日期>，与判读台
+    同账本）；对局记录 tests/blind-session.json gitignore（工作数据）
+  - 账本入 <包>/cost.jsonl；盲测消耗 7 次调用（出题 1 + 对局 6）
+  - validate 的"缺 tests/（盲测用例）"警告自此有了网页产出路径
+
 ## [0.7.3] - 2026-10-23
 
 ### Added（打磨五连：版本可见 / 章节防呆 / 批次不丢 / 进度可见 / 修订可对）

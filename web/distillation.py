@@ -223,3 +223,45 @@ def thought_prompt(analysis: dict) -> str:
 
 ——风格分析——
 {json.dumps(analysis, ensure_ascii=False, indent=1)}"""
+
+
+# ---- 盲测（v0.8.0）：A/B 出题与对局生成 ----
+
+BLIND_TOPIC_MAX_TOKENS = 1200
+BLIND_GEN_MAX_TOKENS = 1500
+
+
+def blind_topics_prompt(profile_text: str) -> str:
+    return f"""基于以下文风档案，设计 3 道 A/B 盲测题（测"带档案 vs 不带档案"的
+生成差异）。每题格式一字不差：
+
+## 题 N：短标题
+
+提示：第一人称，200–300 字。<一个具体、日常、有落差的场景命题>
+
+期望特征（判卷 checklist）：
+- [ ] <该作者风格的可判特征，3–5 条，每条可肉眼核对>
+
+要求：题面场景须中性（不自带该作者的标志性元素，否则裸模型也能沾边）；
+checklist 覆盖句式节奏/对话/收尾等可判维度。只输出 markdown 本体。
+
+——文风档案——
+{profile_text[:4000]}"""
+
+
+def blind_packed_prompt(topic_prompt: str, pack_ctx: str) -> str:
+    return f"""请严格按下方「文风档案」的纪律写作。
+
+{topic_prompt}
+
+硬性要求：句式节奏、对话方式、收尾姿态全部按档案执行；禁用清单逐条遵守；
+篇幅 200–300 字。只输出正文本身（不要标题、不要解释）。
+
+——文风档案——
+{pack_ctx}"""
+
+
+def blind_plain_prompt(topic_prompt: str) -> str:
+    return f"""{topic_prompt}
+
+只输出正文本身（不要标题、不要解释）。"""

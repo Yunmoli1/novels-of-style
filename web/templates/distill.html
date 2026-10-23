@@ -124,6 +124,16 @@ python scripts/build_delta.py downloads/corpus/&lt;语料集&gt; --pack stylepac
 </div>
 
 <div class="panel">
+  <h2 style="margin-top:0">⑤.5 盲测验收（v0.8.0 · 模型调用，推荐定稿前跑）</h2>
+  <div class="genrow">
+    <button class="btn" id="btn_blind" onclick="blindStart()">生成盲测对局（3 轮）</button>
+    <span id="blind_out" class="meta">同题"带包/不带包"各生成一段、打乱甲乙——你来盲选哪段像作者；胜率入 calibration。</span>
+  </div>
+  <div id="blind_box"></div>
+  <div class="cli">等价技能：style-calibrate（A/B 盲测校准，胜率反推档案薄弱维度）；题库 tests/blind-prompts.md 可在步⑤编辑器校订</div>
+</div>
+
+<div class="panel">
   <h2 style="margin-top:0">⑥ 定稿</h2>
   <div class="genrow">
     <label>落位层 <select id="pub_tier">
@@ -437,6 +447,67 @@ async function doPublish() {
     $('pub_out').innerHTML = `✅ 已定稿 → ${esc(d.path)}｜${esc(d.visible)}`;
     loadPack(); setStep(5);
   } catch (e) { $('pub_out').textContent = '失败：' + e.message; }
+}
+
+// ---- 盲测（v0.8.0）----
+async function blindStart() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return alert('先选包');
+  if (!confirm('生成 3 轮盲测对局？每轮带包/裸各一段（共 7 次调用：出题+对局）。')) return;
+  $('btn_blind').disabled = true;
+  $('blind_out').textContent = '启动盲测 job……';
+  try {
+    const st = await api('/app/api/distill/blind/start', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p }) });
+    const d = await pollJob(st.job_id, $('blind_out'));
+    if (d.error) throw new Error(d.error);
+    $('blind_out').textContent = `✓ ${d.result.rounds} 轮对局就绪——开始判读`;
+    blindShow();
+  } catch (e) { $('blind_out').textContent = '失败：' + e.message; }
+  $('btn_blind').disabled = false;
+}
+async function blindShow() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return;
+  try {
+    const v = await api('/app/api/distill/blind/session?pack=' + encodeURIComponent(p));
+    if (!v.rounds.length) {
+      $('blind_box').innerHTML = v.results
+        ? `<p class="meta">本轮盲测已完成：带包被认出 <strong>${v.results.hits}/${v.results.total}</strong>（胜率 ${v.results.win_rate}）——
+           每轮答案 ${v.results.per_round.map(r => `第${r.no}轮带包=${r.packed}（你选${r.choice}）`).join('；')}。重新生成对局可再测。</p>`
+        : '<p class="meta">（对局已全部判定）</p>';
+      return;
+    }
+    const r = v.rounds[0];
+    $('blind_box').innerHTML = `
+      <p class="meta">第 ${r.no} 轮（剩余 ${v.progress || ''}）｜题：${esc(r.title)}——${esc(r.prompt)}</p>
+      <details><summary class="meta">期望特征 checklist（判卷辅助）</summary>
+        <ul class="meta">${(r.checklist || []).map(c => '<li>' + esc(c) + '</li>').join('')}</ul></details>
+      <div class="passage" style="max-height:30vh;overflow:auto"><strong>【甲】</strong>
+${esc(r['甲'])}</div>
+      <div class="passage" style="max-height:30vh;overflow:auto"><strong>【乙】</strong>
+${esc(r['乙'])}</div>
+      <div class="genrow">
+        <button class="btn" onclick="blindJudge('甲')">更像作者是【甲】</button>
+        <button class="btn" onclick="blindJudge('乙')">更像作者是【乙】</button>
+        <button class="btn ghost" onclick="blindJudge('都不像')">都不像</button>
+      </div>`;
+  } catch (e) { $('blind_box').innerHTML = '<p class="meta">' + e.message + '</p>'; }
+}
+async function blindJudge(choice) {
+  const p = S.curPack || $('view_pack').value;
+  const v = await api('/app/api/distill/blind/session?pack=' + encodeURIComponent(p));
+  if (!v.rounds.length) return;
+  const no = v.rounds[0].no;
+  const d = await api('/app/api/distill/blind/judge', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ pack: p, round_no: no, choice }) });
+  if (d.finished) {
+    const rs = d.results;
+    alert(`全部判完！带包被认出 ${rs.hits}/${rs.total}（胜率 ${rs.win_rate}）`);
+  }
+  blindShow();
 }
 setStep(-1);
 loadCorpus().then(loadPacks);

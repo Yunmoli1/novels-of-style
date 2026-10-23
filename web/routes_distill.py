@@ -566,7 +566,7 @@ def analysis_save(body: AnalysisIn):
 # ---- 阶段 C：草案生成 + 逐节校订 + 定稿 ----
 
 EDITABLE_FILES = {"card.md", "profile.md", "exemplars.md", "lexicon.md",
-                  "limits.md", "thought.md"}
+                  "limits.md", "thought.md", "tests/blind-prompts.md"}
 
 
 class PackOnly(BaseModel):
@@ -779,3 +779,170 @@ def publish(body: PublishIn):
             "visible": "创作页包下拉 / 包浏览站点 / 装配（钉扎即用）",
             "cli": f"python scripts/validate_pack.py {_pack_rel(d)}；"
                    f"手动定稿 = 编辑 pack.json 去 status 字段（local 层再移动目录）"}
+
+
+# ---- 盲测验收（v0.8.0）：A/B 对局 + 网页判读 + 胜率入 calibration ----
+
+BLIND_ROUNDS = 3
+
+
+def _blind_session_path(pack_dir: Path) -> Path:
+    return pack_dir / "tests" / "blind-session.json"
+
+
+def _pack_ctx(pack_dir: Path) -> str:
+    """带包臂注入的档案上下文（card+profile+lexicon 禁用+limits，截 6k 字）。"""
+    parts = []
+    for name in ("card.md", "profile.md", "lexicon.md", "limits.md"):
+        f = pack_dir / name
+        if f.is_file():
+            parts.append(f.read_text(encoding="utf-8", errors="replace"))
+    return ("\n\n".join(parts))[:6000]
+
+
+def _parse_topics(md: str) -> list[dict]:
+    """解析 blind-prompts.md：题号/标题/提示/期望特征。"""
+    topics = []
+    for block in re.split(r"^##\s+", md, flags=re.M)[1:]:
+        lines = block.splitlines()
+        title = lines[0].strip()
+        prompt, checklist, mode = "", [], "head"
+        for ln in lines[1:]:
+            if ln.startswith("提示："):
+                prompt = ln[len("提示："):].strip()
+                mode = "chk"
+            elif mode == "chk" and ln.strip().startswith("-"):
+                checklist.append(ln.strip().lstrip("- [ ]").strip())
+        topics.append({"title": title, "prompt": prompt, "checklist": checklist})
+    return [t for t in topics if t["prompt"]]
+
+
+def _blind_run(payload: dict, job: dict) -> dict:
+    """盲测对局生成：无题库先出题（写入 tests/blind-prompts.md，可校订）→
+    每题带包/裸各生成一段 → 随机打乱甲乙 → blind-session.json。"""
+    pack_dir = _pack_dir_checked(payload["pack"])
+    cfg = appstate.load_config()
+    sid = f"blind-{uuid.uuid4().hex[:8]}"
+    (pack_dir / "tests").mkdir(exist_ok=True)
+    topics_md = pack_dir / "tests" / "blind-prompts.md"
+    if not topics_md.is_file():
+        if job:
+            job["step"] = "出题中（按文风档案设计 3 道盲测题）"
+        r = _distill_call(cfg, sid,
+                          distillation.blind_topics_prompt(
+                              _pack_ctx(pack_dir)),
+                          distillation.BLIND_TOPIC_MAX_TOKENS)
+        topics_md.write_text(r["text"], encoding="utf-8", newline="\n")
+    topics = _parse_topics(topics_md.read_text(encoding="utf-8"))[:BLIND_ROUNDS]
+    if not topics:
+        raise HTTPException(400, "blind-prompts.md 无可解析题目（格式：## 题 N + 提示：）")
+    import random
+    rounds = []
+    spend = {"prompt_tokens": 0, "completion_tokens": 0}
+    for i, t in enumerate(topics, 1):
+        if job:
+            job["step"] = f"第 {i}/{len(topics)} 轮对局生成（带包/裸各一段）"
+        topic_prompt = f"提示：{t['prompt']}"
+
+        def _call(prompt: str) -> str:
+            r = _distill_call(cfg, sid, prompt,
+                              distillation.BLIND_GEN_MAX_TOKENS)
+            spend["prompt_tokens"] += r.get("prompt_tokens", 0)
+            spend["completion_tokens"] += r.get("completion_tokens", 0)
+            return r["text"].strip()
+
+        packed = _call(distillation.blind_packed_prompt(
+            topic_prompt, _pack_ctx(pack_dir)))
+        plain = _call(distillation.blind_plain_prompt(topic_prompt))
+        first_is_packed = random.random() < 0.5
+        rounds.append({"no": i, "title": t["title"], "prompt": t["prompt"],
+                       "checklist": t["checklist"],
+                       "甲": packed if first_is_packed else plain,
+                       "乙": plain if first_is_packed else packed,
+                       "packed": "甲" if first_is_packed else "乙",
+                       "choice": None})
+    session = {"pack": pack_dir.name,
+               "created": datetime.datetime.now().isoformat(timespec="seconds"),
+               "rounds": rounds, "results": None}
+    _blind_session_path(pack_dir).write_text(
+        json.dumps(session, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
+    _pack_cost(pack_dir, spend, f"盲测对局 {len(rounds)} 轮")
+    return {"ok": True, "rounds": len(rounds)}
+
+
+class BlindIn(BaseModel):
+    pack: str
+
+
+@router.post("/blind/start")
+def blind_start(body: BlindIn):
+    return {"job_id": _run_job("blind", _blind_run, body.model_dump())}
+
+
+@router.get("/blind/session")
+def blind_session(pack: str):
+    """判读视图：只给甲/乙文本与 checklist——**绝不含 packed 标记**（防泄漏）。"""
+    d = _pack_dir_checked(pack)
+    p = _blind_session_path(d)
+    if not p.is_file():
+        raise HTTPException(404, "还没有盲测对局——先生成")
+    s = splib.load_json(p)
+    view = {"pack": s["pack"], "done": s.get("results") is not None,
+            "rounds": [{k: r[k] for k in ("no", "title", "prompt", "checklist",
+                                          "甲", "乙")}
+                       for r in s["rounds"] if r.get("choice") is None]}
+    if s.get("results"):
+        view["results"] = s["results"]  # 已判完：揭示
+    else:
+        judged = sum(1 for r in s["rounds"] if r.get("choice") is not None)
+        view["progress"] = f"{judged}/{len(s['rounds'])}"
+    return view
+
+
+class BlindJudgeIn(BaseModel):
+    pack: str
+    round_no: int
+    choice: str  # 甲 | 乙 | 都不像
+
+
+@router.post("/blind/judge")
+def blind_judge(body: BlindJudgeIn):
+    if body.choice not in ("甲", "乙", "都不像"):
+        raise HTTPException(400, "choice 须为 甲/乙/都不像")
+    d = _pack_dir_checked(body.pack)
+    p = _blind_session_path(d)
+    if not p.is_file():
+        raise HTTPException(404, "还没有盲测对局")
+    s = splib.load_json(p)
+    if s.get("results"):
+        raise HTTPException(409, "本轮盲测已判完（重新生成对局可再测）")
+    r = next((x for x in s["rounds"] if x["no"] == body.round_no), None)
+    if not r:
+        raise HTTPException(404, f"没有第 {body.round_no} 轮")
+    if r.get("choice"):
+        raise HTTPException(409, f"第 {body.round_no} 轮已判定")
+    r["choice"] = body.choice
+    if all(x.get("choice") for x in s["rounds"]):
+        hits = sum(1 for x in s["rounds"] if x["choice"] == x["packed"])
+        s["results"] = {
+            "win_rate": round(hits / len(s["rounds"]), 2), "hits": hits,
+            "total": len(s["rounds"]),
+            "per_round": [{"no": x["no"], "packed": x["packed"],
+                           "choice": x["choice"]} for x in s["rounds"]]}
+        # 胜率入 calibration（evals/ 与判读台同账本）
+        cal_path = ROOT / "evals" / "calibration.json"
+        try:
+            cal = splib.load_json(cal_path) if cal_path.is_file() else {}
+            cal[f"web_blind_{d.name}_{datetime.date.today():%Y%m%d}"] = {
+                "win_rate": s["results"]["win_rate"],
+                "hits": hits, "total": len(s["rounds"]),
+                "via": "蒸馏台网页盲测"}
+            splib.dump_json(cal, cal_path)
+        except (OSError, ValueError):
+            pass  # 账本写失败不影响判读结果
+    _blind_session_path(d).write_text(
+        json.dumps(s, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
+    return {"ok": True, "finished": s.get("results") is not None,
+            "results": s.get("results")}

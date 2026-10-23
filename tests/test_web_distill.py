@@ -83,7 +83,23 @@ class MockDistillHandler(BaseHTTPRequestHandler):
         msg = payload["messages"][-1]["content"]
         LAST_MSG["v"] = msg
         # 草案分支是纯文本/已编码 JSON——直传；精读分支 dict 才需要 dumps 成 JSON 文本
-        if "写风格范例档案" in msg:
+        if "设计 3 道 A/B 盲测题" in msg:
+            N2 = chr(10) * 2
+            raw = ("## 题 1：冬日的校园" + N2
+                   + "提示：第一人称，200–300 字。冬天的清晨走进校园，遇到一位多年未见的旧同学。" + N2
+                   + "期望特征（判卷 checklist）：" + chr(10)
+                   + "- [ ] 短句顿挫" + chr(10) + "- [ ] 结尾景语收束" + N2
+                   + "## 题 2：告别老屋" + N2
+                   + "提示：第一人称，200–300 字。卖掉祖屋前最后一晚。" + N2
+                   + "期望特征（判卷 checklist）：" + chr(10) + "- [ ] 无直白情绪词" + N2
+                   + "## 题 3：夜航船" + N2
+                   + "提示：第一人称，200–300 字。深夜渡口等船。" + N2
+                   + "期望特征（判卷 checklist）：" + chr(10) + "- [ ] 物象承载" + chr(10))
+        elif "严格按下方「文风档案」" in msg:
+            raw = "带包的一段正文。短句。收束克制。"
+        elif msg.strip().startswith("提示：") and "只输出正文本身" in msg:
+            raw = "裸模型的一段正文，比较平铺直叙，没有任何特别的风格纪律。"
+        elif "写风格范例档案" in msg:
             raw = EXEMPLARS_MD  # 含一条伪造引文——校验应整条剔除
         elif "写 profile.md" in msg:
             raw = PROFILE_MD
@@ -370,6 +386,66 @@ class TestDistillStageA(unittest.TestCase):
         r2 = self.client.post("/app/api/distill/gen_draft", json={
             "pack": "draftpkg", "corpus_dir": "测试作者/落水记"})
         self.assertEqual(r2.status_code, 404)
+
+    def test_blind_full_loop_no_leak(self):
+        """v0.8.0 盲测闭环：出题+对局生成 → 判读视图不泄漏 packed → 逐轮判定
+        → 胜率揭示 + calibration 入账 + session gitignore。"""
+        import time as _t
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        # 包档案（带包臂注入读这些文件）
+        pk = S / "stylepacks" / "rdpkg"
+        (pk / "card.md").write_text("卡", encoding="utf-8")
+        st = self.client.post("/app/api/distill/blind/start",
+                              json={"pack": "rdpkg"}).json()
+        for _ in range(100):
+            job = self.client.get(f"/app/api/distill/job/{st['job_id']}").json()
+            if job["status"] != "running":
+                break
+            _t.sleep(0.1)
+        self.assertEqual(job["status"], "done", str(job.get("error"))[:200])
+        # 题库已生成且可解析
+        prompts = (pk / "tests" / "blind-prompts.md").read_text(encoding="utf-8")
+        self.assertIn("## 题 1", prompts)
+        # 判读视图：不含 packed 标记（防泄漏）
+        v = self.client.get("/app/api/distill/blind/session",
+                            params={"pack": "rdpkg"}).json()
+        raw = _json.dumps(v, ensure_ascii=False)
+        self.assertNotIn('"packed"', raw)
+        self.assertEqual(len(v["rounds"]), 3)
+        self.assertIn("带包的一段", raw)  # 文本本身在（甲或乙随机）
+        # 逐轮判定（按 session 文件真值选 → 全对 → 胜率 1.0）
+        sess = _json.loads((pk / "tests" / "blind-session.json")
+                           .read_text(encoding="utf-8"))
+        last = None
+        for r in sess["rounds"]:
+            last = self.client.post("/app/api/distill/blind/judge", json={
+                "pack": "rdpkg", "round_no": r["no"], "choice": r["packed"]}).json()
+        self.assertTrue(last["finished"])
+        self.assertEqual(last["results"]["win_rate"], 1.0)
+        # 揭示后 session 视图带答案；重判被拒
+        v2 = self.client.get("/app/api/distill/blind/session",
+                             params={"pack": "rdpkg"}).json()
+        self.assertEqual(v2["results"]["hits"], 3)
+        again = self.client.post("/app/api/distill/blind/judge", json={
+            "pack": "rdpkg", "round_no": 1, "choice": "甲"})
+        self.assertEqual(again.status_code, 409)
+        bad = self.client.post("/app/api/distill/blind/judge", json={
+            "pack": "rdpkg", "round_no": 1, "choice": "丙"})
+        self.assertEqual(bad.status_code, 400)
+        # calibration 入账（evals/ 真账本）——断言后即清理，测试不污染账本
+        cal = _json.loads((S / "evals" / "calibration.json").read_text(encoding="utf-8"))
+        keys = [k for k in cal if k.startswith("web_blind_rdpkg_")]
+        self.assertTrue(keys)
+        for k in keys:
+            del cal[k]
+        (S / "evals" / "calibration.json").write_text(
+            _json.dumps(cal, ensure_ascii=False, indent=2) + chr(10),
+            encoding="utf-8")
+        gi = (S / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("blind-session.json", gi)
+
 
     def test_job_start_and_poll(self):
         """v0.7.3 job 化：start 返回 job_id，轮询到 done 且 result 与同步版等价；
