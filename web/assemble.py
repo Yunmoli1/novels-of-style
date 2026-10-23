@@ -48,7 +48,13 @@ def _split_blocks(text: str) -> list[tuple[str, str]]:
     return blocks
 
 
-def _matched_blocks(path: Path, keywords: list[str], kind: str) -> list[dict]:
+def _matched_blocks(path: Path, keywords: list[str], kind: str,
+                    resident_names: set[str] | None = None) -> list[dict]:
+    """bible 块匹配（v0.9.2 World Info 化）：
+    - 常驻：块内 `<!-- resident -->` 标记，或块标题命中 core 实体名（tier=core）
+    - 直接命中：关键词出现在块内
+    - 递归（深度 1）：直接命中块的文本再扫一轮关键词，带入关联条目（去重）
+    prio：0=常驻 / 1=直接命中 / 2=递归——预算裁剪从 prio 高的开始裁。"""
     if not path.is_file():
         return []
     text = splib.read_text(path)[0]
@@ -56,11 +62,38 @@ def _matched_blocks(path: Path, keywords: list[str], kind: str) -> list[dict]:
         return []
     blocks = _split_blocks(text)
     kw = [k for k in keywords if k]
-    hits = [b for b in blocks if any(k in b[1] for k in kw)] if kw else []
-    if not hits:
-        hits = blocks[:2]  # 无命中只带头部，防整卷灌入
-    return [{"kind": kind, "source": f"bible/{path.name}#{t}",
-             "text": body} for t, body in hits]
+    resident_names = resident_names or set()
+    out: dict[str, dict] = {}
+
+    def add(title: str, body: str, prio: int, tag: str) -> None:
+        key = f"{path.name}#{title}"
+        if key in out and out[key]["prio"] <= prio:
+            return
+        out[key] = {"kind": f"{kind}·{tag}", "source": f"bible/{key}",
+                    "text": body, "prio": prio}
+
+    for t, body in blocks:
+        if "<!-- resident -->" in body or t in resident_names:
+            add(t, body, 0, "常驻")
+    direct: list[tuple[str, str]] = []
+    if kw:
+        direct = [b for b in blocks if any(k in b[1] for k in kw)]
+    if not direct:
+        direct = blocks[:1]  # 无命中只带首块防整卷灌入（prio 视作直接）
+    for t, body in direct:
+        add(t, body, 1, "命中")
+    # 递归一轮（深度 1）：未命中块的实体名（块标题）出现在已命中块文本中
+    # → 关联注入。例：关键词"韩天宇"命中人物块，人物块写"兜里只有铜币"→
+    # "## 铜币"块即使不在关键词里也被带出。只扫一轮，不再递归。
+    if direct:
+        scan = "\n".join(b for _, b in direct)
+        direct_keys = {t for t, _ in direct}
+        for t, body in blocks:
+            if t in direct_keys:
+                continue
+            if t and t in scan:
+                add(t, body, 2, "关联")
+    return list(out.values())
 
 
 def _chapter_num(stem: str) -> int | None:
@@ -84,9 +117,22 @@ def assemble(project_dir: Path, pack_dir: Path, chapter_no: int,
             items.append({"kind": f"包·{label}", "source": src, "text": text,
                           "trimmable": False})
 
+    # v0.9.2 常驻双通道（D4）：names.json tier=core 的实体块自动常驻
+    core_names: set[str] = set()
+    names_json = project_dir / "bible" / "names.json"
+    if names_json.is_file():
+        try:
+            nj = json.loads(names_json.read_text(encoding="utf-8"))
+            core_names = {str(x.get("name", "")).strip()
+                          for x in nj.get("names", [])
+                          if isinstance(x, dict) and x.get("tier") == "core"}
+        except (json.JSONDecodeError, OSError):
+            pass
+
     for fname, kind in (("characters.md", "记忆·人物"), ("world.md", "记忆·设定"),
                         ("foreshadowing.md", "记忆·伏笔")):
-        items += _matched_blocks(project_dir / "bible" / fname, keywords, kind)
+        items += _matched_blocks(project_dir / "bible" / fname, keywords, kind,
+                                 core_names)
 
     terms = project_dir / "canon" / "canon-terms.json"
     if terms.is_file():
@@ -112,6 +158,35 @@ def assemble(project_dir: Path, pack_dir: Path, chapter_no: int,
                           "source": f"manuscript/{latest.name}", "text": text,
                           "trimmable": True})
 
+    # 大纲·卷内位置（v0.9.3）：outline.md 的卷主题 + 当前章概要 + 前后各一章
+    outline = project_dir / "outline.md"
+    if outline.is_file():
+        otext = splib.read_text(outline)[0]
+        cur_vol = cur_sec = prev_sec = next_sec = ""
+        vol_title = ""
+        sections: list[tuple[str, str]] = []  # (标题行, 概要)
+        vol = ""
+        for line in otext.splitlines():
+            if line.startswith("## ") and not line.startswith("###"):
+                vol = line.lstrip("# ").strip()
+            elif line.startswith("###"):
+                sections.append((vol, line.lstrip("# ").strip()))
+        for i, (v, sec) in enumerate(sections):
+            m = re.match(r"(?:第)?(\d+)", sec)
+            if m and int(m.group(1)) == chapter_no:
+                cur_vol, cur_sec = v, sec
+                prev_sec = sections[i - 1][1] if i > 0 else ""
+                next_sec = sections[i + 1][1] if i + 1 < len(sections) else ""
+                break
+        if cur_sec:
+            lines = [f"卷：{cur_vol}" if cur_vol else "",
+                     f"前一章：{prev_sec}" if prev_sec else "",
+                     f"本章大纲：{cur_sec}",
+                     f"后一章（走向，勿剧透提前）：{next_sec}" if next_sec else ""]
+            items.append({"kind": "大纲·卷内位置", "source": "outline.md",
+                          "text": "\n".join(x for x in lines if x)[:800],
+                          "trimmable": True})
+
     # 记忆·前情提要（v0.9.0）：MCP 同源 Store 的 recap——最近章摘要+未回收伏笔。
     # 无 db / 空库（新项目、未走记忆登记）静默跳过，装配行为不变。
     try:
@@ -135,12 +210,15 @@ def assemble(project_dir: Path, pack_dir: Path, chapter_no: int,
     except Exception:  # noqa: BLE001 —— 记忆是增强，绝不阻断装配
         pass
 
-    # 预算裁剪：只裁 trimmable，从后往前
+    # 预算裁剪：只裁 trimmable；v0.9.2 按 prio 从高到低裁
+    # （先裁"关联"，再"命中"，常驻最后——重要记忆活到最后）
     def tok(x: dict) -> int:
         return _est_tokens(x["text"])
 
     total = sum(tok(i) for i in items)
-    for item in reversed([i for i in items if i.get("trimmable")]):
+    trimmables = sorted([i for i in items if i.get("trimmable")],
+                        key=lambda i: -(i.get("prio", 0)))
+    for item in trimmables:
         if total <= budget_tokens:
             break
         total -= tok(item)

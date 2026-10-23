@@ -199,6 +199,34 @@ def ending_check_prompt(title: str, draft_tail: str) -> str:
 {draft_tail}"""
 
 
+def rewrite_prompt(chapter_no: int, title: str, beats: list[dict],
+                   context_blocks: list[str], text: str,
+                   fragment: str, instruction: str) -> str:
+    """局部改写（v0.9.3）：只动指定片段，其余逐字保留，输出整章。"""
+    beat_lines = chr(10).join(f"拍{b.get('no')}：{b.get('beat')}" for b in beats)
+    return f"""请对第 {chapter_no} 章《{title}》做局部改写。
+
+改写对象（只改这一段）：
+「{fragment}」
+
+改写指令：{instruction}
+
+硬性要求：
+- 只改写上方片段；**其余正文逐字保留、一字不动**（包括换行与段落顺序）；
+- 改写遵守风格上下文的档案纪律（句式/对话/禁用清单/收尾姿态）；
+- 不新增情节线、不改立意与拍子结构。
+输出改写后的**完整整章正文**（不要标题、不要解释、不要标注改动处）。
+
+——拍子表（结构不得变）——
+{beat_lines}
+
+——风格上下文——
+{chr(10).join(context_blocks)}
+
+——当前整章正文——
+{text}"""
+
+
 def memory_digest_prompt(chapter_no: int, title: str, beats: list[dict],
                          text: str) -> str:
     """交付后登记提取（judge 路由）：digest/状态变更/伏笔。

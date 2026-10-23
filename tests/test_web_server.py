@@ -110,6 +110,8 @@ class MockHandler(BaseHTTPRequestHandler):
                                             "value": "持有大比目鱼",
                                             "note": "绑定情节"}],
                                "foreshadow": ["鱼的来历之谜"]}, ensure_ascii=False)
+        if "局部改写" in user_msg:  # v0.9.3 rewrite（含拍子表字样，须先于拍子分支）
+            return PROSE_REVISED
         if "验收报告" in user_msg:
             return PROSE_REVISED
         if "只输出正文本身" in user_msg:
@@ -279,7 +281,8 @@ class TestWebServer(unittest.TestCase):
         d = r.json()
         kinds = [i["kind"] for i in d["items"]]
         self.assertIn("包·文风档案", kinds)
-        self.assertIn("记忆·人物", kinds)
+        # v0.9.2：bible 块带 ·常驻/·命中/·关联 后缀，前缀匹配
+        self.assertTrue(any(k.startswith("记忆·人物") for k in kinds), kinds)
         self.assertIn("章节锚定·上一章结尾", kinds)
         self.assertTrue(any("大比目鱼" in i["excerpt"] for i in d["items"]))
         self.assertNotIn("kept_texts", d, "预览不得外带全文")
@@ -310,6 +313,7 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("细雨", draft["text"])
         self.assertIn("fp_check", draft)
         self.assertIn("borrow_check", draft)
+        self.assertIn("ai_cliche", draft)  # v0.9.1 第四道 advisory 门
 
         rv = self.client.post("/app/api/revise", json={
             **base, "chosen": OUTLINE["options"][0], "beats": BEATS["beats"],
@@ -705,6 +709,120 @@ class TestWebServer(unittest.TestCase):
                               params={"project": "测试项目"}).json()["slots"]
         self.assertEqual(len(lst[sid - 1]["drafts"]), 2)
         self.assertEqual(lst[sid - 1]["drafts"][1]["label"], "批2·稿1")
+
+    def test_assemble_world_info(self):
+        """v0.9.2 World Info 化：常驻（resident 标记 + core 实体）、递归关联
+        （命中块文本里的名字带出未命中块）、优先级裁剪（关联先裁、常驻最后）。"""
+        import assemble as asm
+        with tempfile.TemporaryDirectory() as td:
+            d = Path(td)
+            (d / "bible").mkdir()
+            (d / "bible" / "characters.md").write_text(
+                "# 人物" + chr(10) * 2 + "## 韩天宇" + chr(10)
+                + "主角。手持大比目鱼，兜里只有铜币。<!-- resident -->" + chr(10) * 2
+                + "## 大比目鱼" + chr(10) + "会说话的武器。搭档。" + chr(10) * 2
+                + "## 路人甲" + chr(10) + "无关角色，不该被注入。" + chr(10) * 2
+                + "## 集市老板" + chr(10) + "提到韩天宇常来买东西。" + chr(10) * 2
+                + "## 铜币" + chr(10) + "通用货币，一枚买一个馒头。" + chr(10),
+                encoding="utf-8")
+            (d / "bible" / "names.json").write_text(
+                json.dumps({"names": [{"name": "大比目鱼", "tier": "core"}]},
+                           ensure_ascii=False), encoding="utf-8")
+            rows = asm._matched_blocks(d / "bible" / "characters.md",
+                                       ["韩天宇"], "记忆·人物",
+                                       {"大比目鱼"})
+            by_src = {r["source"]: r for r in rows}
+            self.assertEqual(by_src["bible/characters.md#韩天宇"]["prio"], 0,
+                             "resident 标记块应常驻")
+            self.assertEqual(by_src["bible/characters.md#韩天宇"]["kind"],
+                             "记忆·人物·常驻")
+            self.assertEqual(by_src["bible/characters.md#大比目鱼"]["prio"], 0,
+                             "core 实体块应常驻（names.json tier=core）")
+            self.assertEqual(by_src["bible/characters.md#集市老板"]["prio"], 1,
+                             "块内含关键词=直接命中")
+            self.assertEqual(by_src["bible/characters.md#铜币"]["prio"], 2,
+                             "递归关联：命中块文本提到铜币→铜币块带入（不在关键词中）")
+            self.assertNotIn("bible/characters.md#路人甲", by_src,
+                             "未命中且无关联的块不得注入")
+            self.assertIn("记忆·人物·常驻", [r["kind"] for r in rows])
+
+    def test_outline_rewrite_export(self):
+        """v0.9.3 小件三连：大纲块注入 + next_chapter 提示 / 局部改写
+        （片段校验+保留率）/ 导出合并。"""
+        import assemble as asm
+        ws = Path(self.tmp.name) / "ws" / "测试项目"
+        # outline.md：卷 + 当前章概要
+        (ws / "outline.md").write_text(
+            "## 卷一 落水" + chr(10) * 2 + "### 1 开局" + chr(10)
+            + "钓上鱼。" + chr(10) * 2 + "### 2 夜谈" + chr(10)
+            + "雨夜对峙。" + chr(10) * 2 + "### 3 追踪" + chr(10) + "进城。" + chr(10),
+            encoding="utf-8")
+        import assemble as _asm
+        from pathlib import Path as _P
+        # 大纲块：chapter_no=2 → 本章=夜谈、前后章可见
+        a = self.client.post("/app/api/assemble", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "keywords": []}).json()
+        ol = [i for i in a["items"] if i["kind"] == "大纲·卷内位置"]
+        self.assertTrue(ol, "outline 存在且含本章时应注入大纲块")
+        self.assertIn("夜谈", ol[0]["excerpt"])
+        self.assertIn("追踪", ol[0]["excerpt"])
+        # next_chapter 提示
+        n = self.client.get("/app/api/next_chapter",
+                            params={"project": "测试项目"}).json()
+        self.assertIn("outline.md 已有", n["outline_hint"])
+        # 局部改写：片段不在正文 → 400
+        bad = self.client.post("/app/api/rewrite", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "title": "夜谈", "text": PROSE, "fragment": "不存在的片段",
+            "instruction": "x"})
+        self.assertEqual(bad.status_code, 400)
+        # 合法片段：mock 返回 PROSE_REVISED；kept_ratio 返回
+        ok = self.client.post("/app/api/rewrite", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "title": "夜谈", "text": PROSE, "fragment": "他推门出去",
+            "instruction": "更冷一点"})
+        self.assertEqual(ok.status_code, 200)
+        d = ok.json()
+        self.assertIn("细雨", d["text"])
+        self.assertIsInstance(d["kept_ratio"], float)
+        self.assertIn("ai_cliche", d)
+        # 导出：区间 1–2（001-开局 002-夜谈 004-x 已存在）
+        ex = self.client.post("/app/api/export", json={
+            "project": "测试项目", "chapter_from": 1, "chapter_to": 2})
+        self.assertEqual(ex.status_code, 200)
+        self.assertIn("枪说自己叫大比目鱼", ex.text)  # 001 内容在
+        self.assertIn("attachment", ex.headers["content-disposition"])
+        miss = self.client.post("/app/api/export", json={
+            "project": "测试项目", "chapter_from": 90, "chapter_to": 99})
+        self.assertEqual(miss.status_code, 404)
+
+    def test_ai_cliche_check_script(self):
+        """v0.9.1 AI 腔检测：三档计数 + 密度 + 豁免 + 退出码。"""
+        import ai_cliche_check as acc
+        words = acc.load_words()
+        self.assertTrue(words["tier1"] and words["tier2"] and words["tier3"])
+        dirty = "他不禁缓缓抬头，嘴角上扬，月光如水。" + "正常句子。" * 20
+        r = acc.check(dirty, words, set())
+        self.assertEqual(r["per_tier"]["tier1"].get("不禁"), 1)
+        self.assertIn("嘴角上扬", r["per_tier"]["tier2"])
+        self.assertIn("月光如水", r["per_tier"]["tier3"])
+        self.assertGreater(r["density"], 1.0)
+        # 豁免：作者本就常用的词免报
+        r2 = acc.check(dirty, words, {"不禁", "缓缓", "嘴角上扬", "月光如水"})
+        self.assertEqual(r2["hits"], 0)
+        clean = acc.check("平实的叙述。" * 50, words, set())
+        self.assertEqual(clean["verdict"], "ok")
+        # CLI 入口（退出码 1=发现）
+        import subprocess, tempfile as _tf
+        with _tf.TemporaryDirectory() as td:
+            f = Path(td) / "d.txt"
+            f.write_text(dirty, encoding="utf-8")
+            cli = subprocess.run([sys.executable, str(S / "scripts" / "ai_cliche_check.py"),
+                                  str(f)], capture_output=True, encoding="utf-8",
+                                 errors="replace", timeout=60)
+            self.assertEqual(cli.returncode, 1)
+            self.assertIn("AI 腔检测", cli.stdout)
 
     def test_memory_delta_merge_recap_assembly(self):
         """v0.9.0 记忆接入：交付登记（judge 提取+脚本风险分级）→ 隔离区分组 →

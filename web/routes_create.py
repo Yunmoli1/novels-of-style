@@ -244,7 +244,13 @@ def next_chapter(project: str):
         for f in ms.glob("*.md"):
             if m := re.match(r"(\d+)", f.stem):
                 best = max(best, int(m.group(1)))
-    return {"next": best + 1, "found": best}
+    hint = ""
+    outline = _project_dir(cfg, project) / "outline.md"
+    if outline.is_file() and (m := re.search(
+            rf"^###+\s*(?:第)?{best + 1}(?:章|[-.：: ])",
+            outline.read_text(encoding="utf-8"), re.M)):
+        hint = f"outline.md 已有第 {best + 1} 章概要（{m.group(0).strip()[:40]}）"
+    return {"next": best + 1, "found": best, "outline_hint": hint}
 
 
 class AssembleIn(BaseModel):
@@ -586,8 +592,11 @@ def do_generate(body: GenerateIn):
             fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
             borrow = _run_gate("borrow_check.py", [str(draft_path),
                                                    "--pack", str(pack_dir)])
+            aic = _run_gate("ai_cliche_check.py", [str(draft_path),
+                                                   "--pack", str(pack_dir)])
             drafts.append({"text": result["text"], "usage": result,
-                           "fp_check": fp, "borrow_check": borrow})
+                           "fp_check": fp, "borrow_check": borrow,
+                           "ai_cliche": aic})
     return {"session_id": sid, "drafts": drafts,
             "assembly_preview": assembly["items"],
             "assembly_tokens": assembly["total_est_tokens"]}
@@ -658,8 +667,11 @@ def _stream_one_draft(cfg: dict, sid: str, prompt: str, budget: int,
         fp = _run_gate("fp_check.py", [str(pack_dir), str(draft_path)])
         borrow = _run_gate("borrow_check.py", [str(draft_path),
                                                "--pack", str(pack_dir)])
+        aic = _run_gate("ai_cliche_check.py", [str(draft_path),
+                                               "--pack", str(pack_dir)])
     yield _sse(done_event, index=index, text=text, usage=usage,
-               fp_check=fp, borrow_check=borrow, **(extra or {}))
+               fp_check=fp, borrow_check=borrow, ai_cliche=aic,
+               **(extra or {}))
 
 
 def _short(exc: Exception, n: int = 120) -> str:
@@ -745,8 +757,10 @@ def do_revise(body: ReviseIn):
         fp = _run_gate("fp_check.py", [str(prep["pack_dir"]), str(draft_path)])
         borrow = _run_gate("borrow_check.py", [str(draft_path),
                                                "--pack", str(prep["pack_dir"])])
+        aic = _run_gate("ai_cliche_check.py", [str(draft_path),
+                                               "--pack", str(prep["pack_dir"])])
     return {"session_id": sid, "text": result["text"], "usage": result,
-            "fp_check": fp, "borrow_check": borrow,
+            "fp_check": fp, "borrow_check": borrow, "ai_cliche": aic,
             "revision": int(body.revision) + 1}
 
 
@@ -766,6 +780,82 @@ def do_revise_stream(body: ReviseIn):
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+class RewriteIn(GenerateIn):
+    text: str
+    fragment: str
+    instruction: str
+
+
+@router.post("/rewrite")
+def do_rewrite(body: RewriteIn):
+    """局部改写（v0.9.3）：只动片段、其余逐字保留，输出整章 + 三道 advisory 门。"""
+    if not body.fragment.strip():
+        raise HTTPException(400, "改写片段为空")
+    if body.fragment not in body.text:
+        raise HTTPException(400, "片段不在正文中（请从当前稿原样粘贴）")
+    if not (body.instruction or "").strip():
+        raise HTTPException(400, "改写指令为空")
+    cfg = appstate.load_config()
+    sid = _session_id(body)
+    prep = _prep_generate(cfg, body)
+    prompt = creation.rewrite_prompt(body.chapter_no, body.title, body.beats,
+                                     prep["assembly"]["kept_texts"], body.text,
+                                     body.fragment, body.instruction)
+    result = _do_model(cfg, "write", sid, prompt,
+                       max(prep["budget"], _prose_budget(
+                           cfg, len(body.text) or 2500) * 2), False)
+    text = result["text"]
+    # 改写守护：其余部分应基本保留（差异段落数 >1/3 视为跑偏，退回原稿提示）
+    import difflib
+    kept_ratio = difflib.SequenceMatcher(
+        None, body.text, text).quick_ratio()
+    with tempfile.TemporaryDirectory() as td:
+        draft_path = Path(td) / "rewritten.txt"
+        draft_path.write_text(text, encoding="utf-8", newline="\n")
+        fp = _run_gate("fp_check.py", [str(prep["pack_dir"]), str(draft_path)])
+        borrow = _run_gate("borrow_check.py", [str(draft_path),
+                                               "--pack", str(prep["pack_dir"])])
+        aic = _run_gate("ai_cliche_check.py", [str(draft_path),
+                                               "--pack", str(prep["pack_dir"])])
+    return {"session_id": sid, "text": text, "usage": result,
+            "kept_ratio": round(kept_ratio, 3),
+            "kept_warning": kept_ratio < 0.6,
+            "fp_check": fp, "borrow_check": borrow, "ai_cliche": aic}
+
+
+class ExportIn(BaseModel):
+    project: str
+    chapter_from: int
+    chapter_to: int
+
+
+@router.post("/export")
+def do_export(body: ExportIn):
+    """导出合并（v0.9.3）：manuscript 按章号区间合并为单个 txt 下载（内存不落盘）。"""
+    cfg = appstate.load_config()
+    ms = _project_dir(cfg, body.project) / "manuscript"
+    picked = []
+    for f in sorted(ms.glob("*.md")) if ms.is_dir() else []:
+        if (n := _chapter_num_local(f.stem)) and body.chapter_from <= n <= body.chapter_to:
+            picked.append((n, f))
+    if not picked:
+        raise HTTPException(404, f"区间 {body.chapter_from}–{body.chapter_to} 内没有章节")
+    parts = []
+    for n, f in picked:
+        parts.append(splib.read_text(f)[0].strip())
+    blob = "\n\n\n".join(parts) + "\n"
+    from fastapi.responses import Response
+    fname = f"{body.project}-{body.chapter_from:03d}-{picked[-1][0]:03d}.txt"
+    return Response(content=blob.encode("utf-8"), media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition":
+                             f"attachment; filename*=UTF-8''{__import__('urllib.parse', fromlist=['quote']).quote(fname)}"})
+
+
+def _chapter_num_local(stem: str) -> int | None:
+    m = re.match(r"(\d+)", stem)
+    return int(m.group(1)) if m else None
 
 
 class EndingIn(BaseModel):

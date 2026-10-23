@@ -87,6 +87,7 @@
   <div class="panel" id="savebox" style="display:none">
     <label>采用稿 <select id="pick"></select></label>
     <button class="btn" onclick="doSave()">确认交付（落盘 manuscript + sessions）</button>
+    <button class="btn ghost" onclick="doExport()">导出合并 txt</button>
     <span id="save_out" class="meta"></span>
   </div>
   <div class="panel" id="memorybox" style="display:none">
@@ -408,8 +409,9 @@ function cardHtml(dr, i) {
     ? `<details><summary class="meta">对比修订前（红=删 绿=增）</summary>${diffHtml(dr.prevText, dr.text)}</details>` : '';
   return `<div class="panel" id="card_${i}"><strong>${dr.label || '稿'}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${trunc}${badge}
     <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>${diffBox}
-    <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
+    <details><summary class="meta">fp_check / borrow_check / ai_cliche 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
     <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
+    <button class="btn ghost" onclick="rewriteFragment(${i})">局部改写</button>
     <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
     <span id="end_${i}" class="meta"></span></div>`;
 }
@@ -524,7 +526,8 @@ function onGenEvent(ev, d) {
     const f = S.batchStart + d.index;
     const label = `批${S.batchNo}·稿${d.index + 1}`;
     S.drafts[f] = { text: d.text, usage: d.usage, fp_check: d.fp_check,
-                    borrow_check: d.borrow_check, batch: S.batchNo, label };
+                    borrow_check: d.borrow_check, ai_cliche: d.ai_cliche,
+                    batch: S.batchNo, label };
     const card = $('card_' + f);
     if (card) card.outerHTML = cardHtml(S.drafts[f], f);
     refreshPick(); setStage(4);  // 只换本稿卡片——别稿可能仍在流式
@@ -558,7 +561,7 @@ async function reviseDraft(i) {
   const oldText = d.text;
   const apply = r => {
     S.drafts[i] = { ...S.drafts[i], prevText: oldText, text: r.text, usage: r.usage,
-      fp_check: r.fp_check, borrow_check: r.borrow_check,
+      fp_check: r.fp_check, borrow_check: r.borrow_check, ai_cliche: r.ai_cliche,
       revision: r.revision, ending: null };
     renderDrafts(); setStage(4);
     persistBatches();
@@ -630,6 +633,54 @@ async function doSave() {
       : '');
   setStage(5);
   memoryDelta();  // 交付后自动登记（隔离区）
+}
+// ---- 局部改写 / 导出（v0.9.3）----
+async function rewriteFragment(i) {
+  const d = S.drafts[i];
+  if (!d || !(d.text || '').trim()) return alert('空稿');
+  const fragment = prompt(`局部改写——粘贴要改的片段（须原样取自本稿）：`);
+  if (!fragment) return;
+  if (!d.text.includes(fragment)) return alert('片段不在本稿中——请原样粘贴');
+  const instruction = prompt('改写指令（如：更冷一点 / 加两句环境 / 对话缩短）：');
+  if (!instruction) return;
+  if (!confirm(`按"${instruction}"改写该片段？其余正文要求逐字保留。`)) return;
+  const card = $('card_' + i);
+  if (card) card.innerHTML = `<strong>${d.label}</strong>（局部改写中<span class="meta">……</span>）
+    <div class="passage streambox" id="rbox_${i}"></div>`;
+  try {
+    const r = await post('/app/api/rewrite', {...S.req, title: $('title').value,
+      chosen: S.chosen || {}, beats: S.beats, text: d.text,
+      fragment, instruction, session_id: S.session_id });
+    S.session_id = r.session_id;
+    S.drafts[i] = { ...d, prevText: d.text, text: r.text, usage: r.usage,
+      fp_check: r.fp_check, borrow_check: r.borrow_check, ai_cliche: r.ai_cliche,
+      ending: null };
+    renderDrafts();
+    if (r.kept_warning)
+      $('gen_out').innerHTML = `<span style="color:var(--bad)">⚠ 局部改写保留率仅 ${r.kept_ratio}（<0.6）——模型动了片段之外的内容，建议回退（本批旧稿仍在）或再改</span>`;
+    else
+      $('gen_out').textContent = `局部改写完成（其余保留率 ${r.kept_ratio}）`;
+    persistBatches();
+  } catch (e) { alert('改写失败：' + e.message); renderDrafts(); }
+}
+async function doExport() {
+  const a = prompt('导出起始章号：', $('chapter_no').value || '1');
+  if (!a) return;
+  const b = prompt('导出结束章号：', $('chapter_no').value || '1');
+  if (!b) return;
+  const r = await fetch('/app/api/export', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ project: $('project').value,
+                           chapter_from: +a, chapter_to: +b }) });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    return alert('导出失败：' + (d.detail || r.status));
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const aEl = document.createElement('a');
+  aEl.href = url; aEl.download = `${$('project').value}-${a}-${b}.txt`;
+  aEl.click(); URL.revokeObjectURL(url);
 }
 // ---- 记忆·隔离区（v0.9.0）----
 async function memoryDelta() {
