@@ -97,11 +97,46 @@ python scripts/build_delta.py downloads/corpus/&lt;语料集&gt; --pack stylepac
 </div>
 
 <div class="panel">
-  <h2 style="margin-top:0">④ 草案生成 ⑤ 逐节校订 ⑥ 定稿</h2>
-  <p class="meta">阶段 C（计划书：项目管理/计划书/工作台v0.7-蒸馏工作台-计划书.md）——
-  九章草案生成、逐节校订编辑器与 validate 定稿将在后续版本点亮；
-  当前可用等价技能流程走 style-analyze 后半段。</p>
-  <div class="cli">技能路径：style-analyze（九章草案 → 人工逐节校订 → motif_count --write → validate_pack.py）</div>
+  <h2 style="margin-top:0">④ 草案生成（阶段 C · 模型调用）</h2>
+  <div class="genrow">
+    <label><input type="checkbox" id="g_thought" checked> 生成 thought.md（思想层，+1 次调用）</label>
+    <button class="btn" id="btn_draft" onclick="previewDraft()">成本预告</button>
+    <span id="g_out" class="meta">依赖阶段 B 的 analysis.json。</span>
+  </div>
+  <div id="g_preview" class="meta"></div>
+  <div id="g_result"></div>
+  <div class="cli">技能路径：style-analyze 步 3（九章草案 → motif_count.py &lt;语料&gt; --pack &lt;包&gt; --write）</div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">⑤ 逐节校订（人工，不可跳过）</h2>
+  <div class="genrow">
+    <label>文件 <select id="e_file" onchange="loadEditFile()">
+      <option value="card.md">card.md</option><option value="profile.md">profile.md</option>
+      <option value="exemplars.md">exemplars.md</option><option value="lexicon.md">lexicon.md</option>
+      <option value="limits.md">limits.md</option><option value="thought.md">thought.md</option>
+    </select></label>
+    <button class="btn ghost" onclick="loadEditFile()">载入</button>
+    <button class="btn" onclick="saveEditFile()">保存修改</button>
+    <span id="e_out" class="meta">重点核对：生成指导映射表、禁用清单、limits、thought 溯源性。</span>
+  </div>
+  <textarea id="e_ta" rows="12" style="width:100%;font:13px/1.6 Consolas,monospace"></textarea>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">⑥ 定稿</h2>
+  <div class="genrow">
+    <label>落位层 <select id="pub_tier">
+      <option value="public">公版层（stylepacks/，公开仓库可见）</option>
+      <option value="local">本地层（stylepacks/local/，受版权语料，不公开再分发）</option>
+    </select></label>
+    <label>置信度 <input id="pub_conf" style="width:200px" value="低（新蒸馏，未盲测）"></label>
+  </div>
+  <div class="genrow">
+    <button class="btn" onclick="doPublish()">validate + 定稿</button>
+    <span id="pub_out" class="meta">validate 必须通过才放行；通过后包对创作页/站点可见。</span>
+  </div>
+  <div class="cli">python scripts/validate_pack.py stylepacks/&lt;包&gt;（本地面再手动移动目录并写 license_note）</div>
 </div>
 
 </div><!-- /左列 -->
@@ -127,7 +162,7 @@ let S = { exclude: new Set(), curDir: '', curPack: '', sel: [], limits: null };
 function setStep(i) {
   const steps = ['入库', '指纹体检', '精读', '草案', '校订', '定稿'];
   $('stepband').innerHTML = steps.map((n, k) =>
-    `<span class="step ${k > 2 ? 'off' : ''} ${k === i ? 'cur' : ''} ${k < i ? 'done' : ''}">${n}${k > 2 ? '（C 期）' : ''}</span>`).join('');
+    `<span class="step ${k === i ? 'cur' : ''} ${k < i ? 'done' : ''}">${n}</span>`).join('');
 }
 async function api(url, opt) {
   const r = await fetch(url, opt);
@@ -315,6 +350,78 @@ async function saveAnalysis() {
       body: JSON.stringify({ pack: p, analysis: a }) });
     $('an_out').textContent = '✓ 已保存（analysis.json）';
   } catch (e) { $('an_out').textContent = '失败：' + e.message; }
+}
+// ---- 阶段 C：草案 / 校订 / 定稿 ----
+async function previewDraft() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return alert('先选包（依赖阶段 B 的 analysis.json）');
+  $('g_out').textContent = '估算中……';
+  try {
+    const d = await api('/app/api/distill/preview_draft', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p }) });
+    $('g_preview').textContent = `预告：约 ${d.est_calls} 次调用 ≈ `
+      + `${Math.round(d.est_tokens / 1000)}k tokens（含范例逐字校验与 motif 脚本验证，均不计费）`;
+    if (confirm('开始草案生成？' + $('g_preview').textContent)) await genDraft();
+    else $('g_out').textContent = '';
+  } catch (e) { $('g_out').textContent = '失败：' + e.message; }
+}
+async function genDraft() {
+  const p = S.curPack || $('view_pack').value;
+  $('btn_draft').disabled = true;
+  $('g_out').textContent = '生成中（范例→九章→三件套' + ($('g_thought').checked ? '→思想' : '') + '，逐文件低温）……';
+  try {
+    const d = await api('/app/api/distill/gen_draft', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p, corpus_dir: S.curDir,
+                             include_thought: $('g_thought').checked }) });
+    let html = `<p class="meta">✓ 已产出：${d.files.map(esc).join('、')}｜消耗 `
+      + `${Math.round((d.usage.prompt_tokens + d.usage.completion_tokens) / 1000)}k tokens</p>`;
+    if (d.quotes_dropped)
+      html += `<p style="color:var(--bad)">⚠ 伪造引文整条剔除 ${d.quotes_dropped} 条：`
+        + `${d.quotes_dropped_labels.map(esc).join('、')}</p>`;
+    if (d.motif_report)
+      html += `<details><summary class="meta">motif 脚本验证报告</summary><pre class="meta">${esc(d.motif_report)}</pre></details>`;
+    $('g_result').innerHTML = html;
+    $('g_out').textContent = '草案完成——去步⑤逐节校订。';
+    loadPack(); setStep(4);
+  } catch (e) { $('g_out').textContent = '失败：' + e.message; }
+  $('btn_draft').disabled = false;
+}
+async function loadEditFile() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return;
+  try {
+    const d = await api('/app/api/distill/file?pack='
+      + encodeURIComponent(p) + '&name=' + encodeURIComponent($('e_file').value));
+    $('e_ta').value = d.content;
+    $('e_out').textContent = '已载入 ' + d.name;
+  } catch (e) { $('e_ta').value = ''; $('e_out').textContent = e.message; }
+}
+async function saveEditFile() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return alert('先选包');
+  try {
+    await api('/app/api/distill/file', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p, name: $('e_file').value,
+                             content: $('e_ta').value }) });
+    $('e_out').textContent = '✓ 已保存 ' + $('e_file').value + '——可跑 validate 复查';
+  } catch (e) { $('e_out').textContent = '失败：' + e.message; }
+}
+async function doPublish() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return alert('先选包');
+  if (!confirm(`定稿 ${p}？validate 必须通过（缺文件会被拒绝）；定稿后包对外可见。`)) return;
+  $('pub_out').textContent = 'validate + 定稿中……';
+  try {
+    const d = await api('/app/api/distill/publish', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p, tier: $('pub_tier').value,
+                             confidence: $('pub_conf').value.trim() }) });
+    $('pub_out').innerHTML = `✅ 已定稿 → ${esc(d.path)}｜${esc(d.visible)}`;
+    loadPack(); setStep(5);
+  } catch (e) { $('pub_out').textContent = '失败：' + e.message; }
 }
 setStep(-1);
 loadCorpus().then(loadPacks);

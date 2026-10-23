@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 READ_SINGLE_MAX = 100_000  # 字：单次精读上限，超出走 map-reduce
 CHUNK_CHARS = 60_000       # map 块的字数预算
@@ -129,3 +130,96 @@ def chunk_files(samples: list[tuple[str, str]],
     if cur:
         chunks.append(cur)
     return chunks
+
+
+# ---- 阶段 C：草案生成（提示词；引文校验是脚本的不是模型的）----
+
+EXEMPLARS_MAX_TOKENS = 2600
+PROFILE_MAX_TOKENS = 3200
+TRIO_MAX_TOKENS = 2600
+THOUGHT_MAX_TOKENS = 1800
+
+
+def exemplars_prompt(analysis: dict, samples: list[tuple[str, str]]) -> str:
+    return f"""基于以下风格分析与语料，写风格范例档案 exemplars.md。
+
+要求：
+- 6–10 条，每条格式（三行，缺一不可）：
+### 特征标签
+> 逐字引自下方语料的原文（≤200 字，一字不改）
+批注：演示了什么手法、写作时应何时模仿
+- 引文必须**逐字**取自语料——脚本会做逐字校验，伪造引文整条剔除
+- 覆盖不同维度：叙事节奏 / 对话 / 场景转换 / 情绪外化 / 标志手法
+只输出 markdown 本体（从第一条 ### 开始，不要解释）。
+
+——风格分析——
+{json.dumps(analysis, ensure_ascii=False, indent=1)}
+
+——语料（引文只能从这里取）——
+{_body(samples)}"""
+
+
+def verify_exemplar_quotes(md: str, corpus_text: str) -> tuple[str, int, list[str]]:
+    """逐字校验范例引文（溯源硬保证）：引文不在语料中的整条剔除。
+    返回（净化后的 md，剔除条数，剔除标签列表）。"""
+    entries = re.split(r"^###\s+", md, flags=re.M)[1:]
+    kept, dropped, labels = [], 0, []
+    for e in entries:
+        quotes = re.findall(r"^>\s?(.*)$", e, flags=re.M)
+        ok = any(q.strip().strip("》>") and q.strip().strip("》>") in corpus_text
+                 for q in quotes)
+        if ok:
+            kept.append("### " + e.strip())
+        else:
+            dropped += 1
+            labels.append(e.splitlines()[0].strip() if e.splitlines() else "?")
+    return "\n\n".join(kept) + ("\n" if kept else ""), dropped, labels
+
+
+def profile_prompt(analysis: dict, exemplars_md: str, metrics_note: str) -> str:
+    return f"""基于风格分析与范例档案，写 profile.md（文风档案）。硬性要求：
+- 九章骨架，h2 章节标题一字不差：## 三百字精华 / ## 叙事视角与人称 /
+  ## 句式与节奏 / ## 词汇与用典 / ## 对话风格 / ## 场景与结构 /
+  ## 情感与氛围 / ## 生成指导 / ## 禁用清单
+- 「生成指导」必须是映射表：每行"遇 X 场景 → 用 Y 手法 → 参考范例 N"（N=范例序号）
+- 「句式与节奏」须引用实测锚点：{metrics_note}
+- 每个判断尽量能追溯到范例编号或指标；不确定的写"待校订"
+只输出 markdown 本体。
+
+——风格分析——
+{json.dumps(analysis, ensure_ascii=False, indent=1)}
+
+——范例档案（生成指导引用其序号）——
+{exemplars_md}"""
+
+
+def trio_prompt(analysis: dict, top_chars: list[str], exemplars_md: str) -> str:
+    return f"""基于风格分析与高频字数据，产出三件档案。只输出 JSON：
+{{"card_md": "card.md 本体（≤400 字，从三百字精华压缩；超长会被校验拒绝）",
+ "lexicon_md": "lexicon.md 本体（## 标志词 / ## 句式模板 / ## 禁用清单；标志词结合高频字）",
+ "limits_md": "limits.md 本体（逐维标注【可模仿|部分可模仿|难模仿】，诚实标注）"}}
+
+——高频字（lexicon 参考口径：字频序）——
+{'、'.join(top_chars[:40])}
+
+——风格分析——
+{json.dumps(analysis, ensure_ascii=False, indent=1)}
+
+——范例档案——
+{exemplars_md[:1500]}"""
+
+
+def thought_prompt(analysis: dict) -> str:
+    return f"""基于风格分析的思想四问，写 thought.md（思想层档案，v0.3 六节）。
+硬性要求：
+- 六节 h2 标题：## 选题地平线 / ## 立意动作 / ## 观察清单 / ## 意象系统 /
+  ## 价值姿态 / ## 禁区
+- 「立意动作」与「观察清单」每条必须指认依据篇目（来自分析中的立意动作.依据）——
+  不可溯源的条目不要写
+- 「价值姿态」落成可执行指令（如"叙述者后退半步，让事实并置，禁直接评判"）
+- 必须包含一行词表（格式一字不差）：`motif 词表：词1、词2、…`
+  （10–30 个，取自意象族提案——脚本将按语料频率验证，低于 1.5/千字自动剔除）
+只输出 markdown 本体。
+
+——风格分析——
+{json.dumps(analysis, ensure_ascii=False, indent=1)}"""

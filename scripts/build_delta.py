@@ -80,6 +80,11 @@ def main() -> int:
         loo = splib.leave_one_out(named, top_n=args.top_n)
         fingerprint["genres"] = layers["genres"]
         fingerprint["self_check"] = loo
+        # 顶层混合 metrics（带容差）+ 完整实测快照——v0.7.2：新蒸馏包不过
+        # fp_check 的混合层就从来没被写过，validate 会因无容差叶拒绝定稿
+        fingerprint["metrics"] = splib.derive_thresholds([t for _, t in named])
+        fingerprint["reference"] = splib.compute_metrics(
+            "\n\n".join(t for _, t in named))
 
     # 内容变更检测 + 单次写盘 + 元数据联动
     new_text = json.dumps(fingerprint, ensure_ascii=False, indent=2) + "\n"

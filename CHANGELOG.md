@@ -2,6 +2,30 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.7.2] - 2026-10-23
+
+### Added
+- **蒸馏工作台阶段 C：草案生成 + 逐节校订 + 定稿**（计划书阶段 C；步 ④⑤⑥
+  点亮，"加新作者"全流程闭环）：
+  - 草案生成（/gen_draft，4–5 次低温调用）：exemplars（**引文逐字校验**——
+    不在语料中的伪造引文整条剔除，溯源硬保证）→ 九章 profile（引用范例
+    序号 + 实测锚点）→ card/lexicon/limits 三件套（JSON 包装）→ thought
+    （可选）+ motif_count --write 脚本验证；pack.json 补全诚实
+    corpus/provenance（从 ingest 记录回填）
+  - 逐节校订：档案白名单（6 个 md）GET/POST /file，页面分文件编辑器
+  - 定稿（/publish）：**validate 必须通过**否则 400 拒绝；选层落位
+    （公版 stylepacks/ 顶层 / 本地 stylepacks/local/ + license_note 自动写）；
+    status 字段移除后即刻对创作页/站点/装配可见
+  - 成本预告先行（/preview_draft），账本入 <包>/cost.jsonl
+
+### Fixed
+- **build_delta --layered 补写顶层混合 metrics（derive_thresholds 带容差）
+  + reference 实测快照**——此前分层指纹只有 genres 层有容差叶，顶层恒缺，
+  新蒸馏包永远过不了 validate（"带容差的指标叶仅 0 个"）；手作包系人工补写，
+  此为引擎级缺口
+- pack 脚手架修正：provenance 须为数组、license_note/changelog 必备字段
+  （validate 硬性要求），阶段 A 起即正确
+
 ## [0.7.1] - 2026-10-23
 
 ### Added

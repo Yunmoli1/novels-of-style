@@ -251,10 +251,11 @@ def pack_create(body: PackIn):
         "display_name": body.display_name or name, "language": "zh",
         "genres": [], "registers": False, "version": "0.1.0",
         "created": today, "updated": today, "status": "draft",
-        "corpus": {"works": [], "total_chars": 0, "sampling": "",
+        "corpus": {"works": [], "total_chars": 0,
+                   "sampling": f"待定（蒸馏台草案，语料集：{body.corpus_dir or '未记录'}）",
                    "confidence": "未定稿（蒸馏台草稿）"},
-        "provenance": {"sources": [], "notes":
-                       f"语料集：{body.corpus_dir or '未记录'}；蒸馏台阶段 A 创建"},
+        # provenance 须为数组、license_note/changelog 必备——validate 硬性字段
+        "provenance": [], "license_note": "", "changelog": [],
     }
     pj.write_text(json.dumps(scaffold, ensure_ascii=False, indent=2) + "\n",
                   encoding="utf-8", newline="\n")
@@ -493,3 +494,214 @@ def analysis_save(body: AnalysisIn):
         json.dumps(record, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8", newline="\n")
     return {"ok": True}
+
+
+# ---- 阶段 C：草案生成 + 逐节校订 + 定稿 ----
+
+EDITABLE_FILES = {"card.md", "profile.md", "exemplars.md", "lexicon.md",
+                  "limits.md", "thought.md"}
+
+
+class PackOnly(BaseModel):
+    pack: str
+
+
+@router.post("/preview_draft")
+def preview_draft(body: PackOnly):
+    """草案生成成本预告：N 次调用（范例/九章/三件套/思想可选）+ tokens 估算。"""
+    d = _pack_dir_checked(body.pack)
+    rec = (splib.load_json(d / "analysis.json")
+           if (d / "analysis.json").is_file() else None)
+    if not rec:
+        raise HTTPException(404, "先跑阶段 B 精读（analysis.json 不存在）")
+    total = int(rec.get("total_chars") or 0)
+    calls = 4  # 范例 / 九章 profile / 三件套 / card 内含
+    est = int(total * 0.75) + distillation.EXEMPLARS_MAX_TOKENS \
+        + distillation.PROFILE_MAX_TOKENS + distillation.TRIO_MAX_TOKENS
+    return {"est_calls": calls, "est_tokens": est, "mode_hint": "逐文件低温生成",
+            "note": "另可选生成 thought.md（+1 次调用）；motif 验证是脚本不计费"}
+
+
+class GenDraftIn(BaseModel):
+    pack: str
+    corpus_dir: str
+    include_thought: bool = True
+
+
+@router.post("/gen_draft")
+def gen_draft(body: GenDraftIn):
+    """草案生成：范例（引文逐字校验，伪造整条剔除）→ 九章 profile（引用范例
+    序号）→ card/lexicon/limits 三件套 → thought（可选）→ motif_count --write
+    → pack.json 补全（诚实 corpus/provenance）。提案是模型的，校验是脚本的。"""
+    d = _pack_dir_checked(body.pack)
+    rec_path = d / "analysis.json"
+    if not rec_path.is_file():
+        raise HTTPException(404, "先跑阶段 B 精读（analysis.json 不存在）")
+    rec = splib.load_json(rec_path)
+    analysis = rec.get("analysis") or {}
+    files = rec.get("files") or []
+    cfg = appstate.load_config()
+    cdir = _corpus_dir(cfg, body.corpus_dir)
+    collected = {f.name: f for f in splib.collect_text_files([str(cdir)])}
+    samples = [(n, splib.read_text(collected[n])[0]) for n in files if n in collected]
+    if not samples:
+        raise HTTPException(400, "精读记录的选样文件已不在语料集——请重跑阶段 B")
+    corpus_text = "\n".join(t for _, t in samples)
+    sid = f"distill-{uuid.uuid4().hex[:8]}"
+    spend = {"prompt_tokens": 0, "completion_tokens": 0}
+    report: list[dict] = []
+
+    def call(name: str, prompt: str, max_tokens: int) -> str:
+        r = _distill_call(cfg, sid, prompt, max_tokens)
+        spend["prompt_tokens"] += r.get("prompt_tokens", 0)
+        spend["completion_tokens"] += r.get("completion_tokens", 0)
+        report.append({"file": name, "completion_tokens": r.get("completion_tokens", 0)})
+        return r["text"]
+
+    # 1) 范例（引文逐字校验）
+    ex_md = call("exemplars.md",
+                 distillation.exemplars_prompt(analysis, samples),
+                 distillation.EXEMPLARS_MAX_TOKENS)
+    ex_md, dropped, labels = distillation.verify_exemplar_quotes(ex_md, corpus_text)
+    (d / "exemplars.md").write_text(ex_md, encoding="utf-8", newline="\n")
+
+    # 2) 九章 profile（引用范例序号）
+    fp = splib.load_json(d / "fingerprint.json") if (d / "fingerprint.json").is_file() else {}
+    sl = ((fp.get("genres") or {}).get("narrative", {}).get("metrics")
+          or {}).get("sentence_length", {})
+    metrics_note = (f"句长 P50={sl.get('p50', {}).get('target', '实测值')}、"
+                    f"P25={sl.get('p25', {}).get('target', '—')}、"
+                    f"P75={sl.get('p75', {}).get('target', '—')}（build_delta 实测）")
+    (d / "profile.md").write_text(
+        call("profile.md",
+             distillation.profile_prompt(analysis, ex_md, metrics_note),
+             distillation.PROFILE_MAX_TOKENS),
+        encoding="utf-8", newline="\n")
+
+    # 3) card/lexicon/limits 三件套（JSON 包装）
+    top_chars = []
+    fp_ext = d / "fp_extract.json"
+    if fp_ext.is_file():
+        top_chars = list((splib.load_json(fp_ext).get("top_chars") or {}).keys())
+    trio = creation.extract_json(call(
+        "card+lexicon+limits",
+        distillation.trio_prompt(analysis, top_chars, ex_md),
+        distillation.TRIO_MAX_TOKENS))
+    for key, fname in (("card_md", "card.md"), ("lexicon_md", "lexicon.md"),
+                       ("limits_md", "limits.md")):
+        (d / fname).write_text(str(trio.get(key) or ""), encoding="utf-8",
+                               newline="\n")
+
+    # 4) thought（可选）+ motif 脚本验证
+    motif_report = ""
+    if body.include_thought:
+        (d / "thought.md").write_text(
+            call("thought.md", distillation.thought_prompt(analysis),
+                 distillation.THOUGHT_MAX_TOKENS),
+            encoding="utf-8", newline="\n")
+        mc = _run_script("motif_count.py", [str(cdir), "--pack", str(d), "--write"],
+                         timeout=300)
+        motif_report = (mc.stdout or "") + (mc.stderr or "")
+        if mc.returncode != 0:
+            motif_report += "（motif 验证失败不阻塞草案——可修词表行后重跑）"
+
+    # 5) pack.json 补全（诚实 corpus/provenance）
+    meta = splib.load_json(d / "pack.json")
+    works = []
+    total_chars = 0
+    for w in sorted(cdir.iterdir()):
+        if w.is_dir() and (w / "provenance.json").is_file():
+            prov = splib.load_json(w / "provenance.json")
+            works.append(w.name)
+            total_chars += int(prov.get("total_chars") or 0)
+            meta.setdefault("provenance", []).append({
+                "type": "ingest", "work": w.name,
+                "url": prov.get("source_url", ""),
+                "fetched_at": prov.get("fetched_at", ""),
+                "notes": f"原编码 {prov.get('original_encoding', '?')}；"
+                         f"去广告 {prov.get('ads_removed_lines', 0)} 行"})
+    if not works:  # 平铺语料：作者目录即语料集
+        works = [cdir.name]
+        total_chars = sum(r["chars"] for r in
+                          _sample_rows(cfg, body.corpus_dir))
+        meta.setdefault("provenance", []).append({
+            "type": "ingest", "work": cdir.name, "url": "", "fetched_at": "",
+            "notes": "平铺语料（逐文件 provenance 见语料目录）"})
+    meta["corpus"] = {"works": works, "total_chars": total_chars,
+                      "sampling": f"分层采样精读 {len(files)} 篇（自动选样："
+                                  f"首/中/尾/对话密集/叙述密集）",
+                      "confidence": "低（新蒸馏草案，未盲测）"}
+    meta["thought"] = bool(body.include_thought)
+    splib.dump_json(meta, d / "pack.json")
+    _pack_cost(d, spend, f"草案生成（thought={body.include_thought}）")
+    return {"ok": True, "files": [r["file"] for r in report], "report": report,
+            "quotes_dropped": dropped, "quotes_dropped_labels": labels,
+            "motif_report": motif_report[-800:], "usage": spend,
+            "cli": "技能路径：style-analyze 步 3（九章草案 → motif_count --write）"}
+
+
+@router.get("/file")
+def file_get(pack: str, name: str):
+    if name not in EDITABLE_FILES:
+        raise HTTPException(400, f"该文件不在可编辑清单：{name}")
+    d = _pack_dir_checked(pack)
+    p = d / name
+    if not p.is_file():
+        raise HTTPException(404, f"{name} 不存在（先草案生成）")
+    return {"name": name, "content": p.read_text(encoding="utf-8")}
+
+
+class FileIn(BaseModel):
+    pack: str
+    name: str
+    content: str
+
+
+@router.post("/file")
+def file_save(body: FileIn):
+    """逐节校订：人工编辑档案文件（白名单内；thought 需草案期勾选生成）。"""
+    if body.name not in EDITABLE_FILES:
+        raise HTTPException(400, f"该文件不在可编辑清单：{body.name}")
+    d = _pack_dir_checked(body.pack)
+    (d / body.name).write_text(body.content, encoding="utf-8", newline="\n")
+    return {"ok": True}
+
+
+class PublishIn(BaseModel):
+    pack: str
+    tier: str = "public"  # public | local
+    license_note: str = ""
+    confidence: str = "低（新蒸馏，未盲测）"
+
+
+@router.post("/publish")
+def publish(body: PublishIn):
+    """定稿：validate 必须通过；按层落位（公版顶层 / 本地 local 层）并置
+    status: published——此后创作页/站点/装配可见。"""
+    d = _pack_dir_checked(body.pack)
+    v = _run_script("validate_pack.py", [str(d)], timeout=300)
+    if v.returncode != 0:
+        raise HTTPException(400, "validate 未通过，定稿被拒绝：\n"
+                                 + ((v.stdout or "") + (v.stderr or ""))[-900:])
+    meta = splib.load_json(d / "pack.json")
+    meta.pop("status", None)
+    meta["corpus"]["confidence"] = body.confidence or "低（新蒸馏，未盲测）"
+    if body.tier == "local":
+        meta["license_note"] = (body.license_note
+                                or "本地层：含受版权语料的分析，不得公开再分发")
+    today = datetime.date.today().isoformat()
+    meta.setdefault("changelog", []).append(
+        {"version": meta.get("version", "0.1.0"), "date": today,
+         "changes": "蒸馏台定稿（阶段 C）"})
+    splib.dump_json(meta, d / "pack.json")
+    if body.tier == "local":
+        local = STYLEPACKS / "local"
+        local.mkdir(exist_ok=True)
+        target = local / d.name
+        if target.exists():
+            raise HTTPException(409, f"local 层已有同名包：{d.name}")
+        d = d.rename(target)
+    return {"ok": True, "path": _pack_rel(d),
+            "visible": "创作页包下拉 / 包浏览站点 / 装配（钉扎即用）",
+            "cli": f"python scripts/validate_pack.py {_pack_rel(d)}；"
+                   f"手动定稿 = 编辑 pack.json 去 status 字段（local 层再移动目录）"}

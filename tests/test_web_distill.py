@@ -31,6 +31,47 @@ CHUNK_OBS = {"视角": "第三人称", "节奏": "短句", "对话": "口癖重�
              "场景": "硬切", "手法": ["复沓"]}
 LAST_MSG = {"v": ""}
 
+EXEMPLARS_MD = """### 冷静叙述
+
+> 他掉进了河里。河水冰冷刺骨。
+
+批注：短句压节奏，写作时遇落难场景模仿。
+
+### 冷面对话
+
+> “见鬼。”他说。
+
+批注：口癖短应答，对话针锋相对时模仿。
+
+### 伪造条目
+
+> 这句话不在语料里，是模型编的。
+
+批注：应被脚本整条剔除。"""
+
+PROFILE_MD = ("## 三百字精华\n\n冷面短句，物象承载情绪。\n\n"
+              "## 叙事视角与人称\n\n第三人称限知。\n\n"
+              "## 句式与节奏\n\n句长 P50 见实测锚点。\n\n"
+              "## 词汇与用典\n\n日常词为主。\n\n"
+              "## 对话风格\n\n短应答。\n\n"
+              "## 场景与结构\n\n硬切。\n\n"
+              "## 情感与氛围\n\n不直呼情绪。\n\n"
+              "## 生成指导\n\n遇落难场景 → 用冷静叙述 → 参考范例 1\n\n"
+              "## 禁用清单\n\n禁排比抒情。")
+
+TRIO = {"card_md": "## 卡片\n冷面短句，物象承载情绪；对话短应答；禁排比抒情。",
+        "lexicon_md": "## 标志词\n\n冷、河、鬼\n\n## 句式模板\n\n短句直给\n\n"
+                      "## 禁用清单\n\n禁成语堆砌",
+        "limits_md": "叙事节奏【可模仿】\n对话口癖【可模仿】\n思想层【部分可模仿】"}
+
+THOUGHT_MD = ("## 选题地平线\n\n小人物的一天。\n\n"
+              "## 立意动作\n\n- 以小见大（依据：001-第一章-落水）\n\n"
+              "## 观察清单\n\n- 吃穿用度（依据：001-第一章-落水）\n\n"
+              "## 意象系统\n\n河与夜。\n\n"
+              "## 价值姿态\n\n叙述者后退半步，让事实并置。\n\n"
+              "## 禁区\n\n不写大场面。\n\n"
+              "motif 词表：河、鬼、夜")
+
 
 class MockDistillHandler(BaseHTTPRequestHandler):
     def log_message(self, *a):
@@ -41,14 +82,23 @@ class MockDistillHandler(BaseHTTPRequestHandler):
         payload = _json.loads(self.rfile.read(n) or b"{}")
         msg = payload["messages"][-1]["content"]
         LAST_MSG["v"] = msg
-        if "融合为最终答案" in msg:
-            content = FULL
+        # 草案分支是纯文本/已编码 JSON——直传；精读分支 dict 才需要 dumps 成 JSON 文本
+        if "写风格范例档案" in msg:
+            raw = EXEMPLARS_MD  # 含一条伪造引文——校验应整条剔除
+        elif "写 profile.md" in msg:
+            raw = PROFILE_MD
+        elif "产出三件档案" in msg:
+            raw = _json.dumps(TRIO, ensure_ascii=False)
+        elif "写 thought.md" in msg:
+            raw = THOUGHT_MD
+        elif "融合为最终答案" in msg:
+            raw = _json.dumps(FULL, ensure_ascii=False)
         elif "分块精读" in msg:
-            content = CHUNK_OBS
+            raw = _json.dumps(CHUNK_OBS, ensure_ascii=False)
         else:
-            content = FULL
-        body = _json.dumps({"choices": [{"message": {"content": _json.dumps(
-            content, ensure_ascii=False)}, "finish_reason": "stop"}],
+            raw = _json.dumps(FULL, ensure_ascii=False)
+        body = _json.dumps({"choices": [{"message": {"content": raw},
+                                 "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50}},
             ensure_ascii=False).encode("utf-8")
         self.send_response(200)
@@ -92,8 +142,9 @@ class TestDistillStageA(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.mock.shutdown()
-        for name in ("draftpkg", "fppkg", "rdpkg"):  # 草稿包建在仓库 stylepacks/，测完即清
+        for name in ("draftpkg", "fppkg", "rdpkg", "pubpkg"):  # 草稿包建在仓库 stylepacks/，测完即清
             shutil.rmtree(S / "stylepacks" / name, ignore_errors=True)
+            shutil.rmtree(S / "stylepacks" / "local" / name, ignore_errors=True)
 
 
     def _ingest(self):
@@ -277,6 +328,104 @@ class TestDistillStageA(unittest.TestCase):
             "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
             "files": ["不存在.txt"]})
         self.assertEqual(r.status_code, 400)
+
+    def test_gen_draft_pipeline(self):
+        """阶段 C 草案管线：范例引文逐字校验（伪造整条剔除）→ 九章 profile →
+        三件套 → thought + motif 脚本验证 → pack.json 诚实补全。"""
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        self.client.post("/app/api/distill/read", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "files": ["001-第一章-落水.md", "002-第二章-上岸.md"]})
+        pv = self.client.post("/app/api/distill/preview_draft",
+                              json={"pack": "rdpkg"})
+        self.assertEqual(pv.status_code, 200)
+        self.assertGreaterEqual(pv.json()["est_calls"], 3)
+        r = self.client.post("/app/api/distill/gen_draft", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "include_thought": True})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertEqual(d["quotes_dropped"], 1, "伪造引文应整条剔除")
+        self.assertIn("伪造条目", d["quotes_dropped_labels"])
+        pk = S / "stylepacks" / "rdpkg"
+        ex = (pk / "exemplars.md").read_text(encoding="utf-8")
+        self.assertNotIn("伪造", ex)
+        self.assertIn("河水冰冷刺骨", ex)
+        self.assertIn("## 三百字精华", (pk / "profile.md").read_text(encoding="utf-8"))
+        self.assertIn("## 卡片", (pk / "card.md").read_text(encoding="utf-8"))
+        self.assertIn("## 标志词", (pk / "lexicon.md").read_text(encoding="utf-8"))
+        self.assertIn("【可模仿】", (pk / "limits.md").read_text(encoding="utf-8"))
+        th = (pk / "thought.md").read_text(encoding="utf-8")
+        self.assertIn("motif 词表：", th)
+        self.assertTrue(d["motif_report"])
+        meta = _json.loads((pk / "pack.json").read_text(encoding="utf-8"))
+        self.assertEqual(meta["corpus"]["works"], ["落水记"])
+        self.assertGreater(meta["corpus"]["total_chars"], 0)
+        self.assertIsInstance(meta["provenance"], list)
+        self.assertTrue(meta["provenance"], "provenance 应从 ingest 记录回填")
+        # 无 analysis 的包 → 404
+        self.client.post("/app/api/distill/pack", json={"name": "draftpkg"})
+        r2 = self.client.post("/app/api/distill/gen_draft", json={
+            "pack": "draftpkg", "corpus_dir": "测试作者/落水记"})
+        self.assertEqual(r2.status_code, 404)
+
+    def test_file_edit_roundtrip_and_whitelist(self):
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        r = self.client.get("/app/api/distill/file",
+                            params={"pack": "rdpkg", "name": "pack.json"})
+        self.assertEqual(r.status_code, 400, "白名单外的文件不得编辑")
+        r2 = self.client.post("/app/api/distill/file", json={
+            "pack": "rdpkg", "name": "lexicon.md", "content": "## 标志词\n人工修订"})
+        self.assertEqual(r2.status_code, 200)
+        g = self.client.get("/app/api/distill/file",
+                            params={"pack": "rdpkg", "name": "lexicon.md"}).json()
+        self.assertIn("人工修订", g["content"])
+
+    def test_publish_gate_and_local_move(self):
+        """定稿门禁：validate 未通过 → 400 拒绝；通过 → local 层落位 + 对外可见。"""
+        self._ingest()
+        # 门禁：缺档案的草稿包拒绝定稿
+        self.client.post("/app/api/distill/pack", json={
+            "name": "draftpkg", "corpus_dir": "测试作者/落水记"})
+        r = self.client.post("/app/api/distill/publish", json={
+            "pack": "draftpkg", "tier": "local"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("validate 未通过", r.json()["detail"])
+        # 合格包：draft + 指纹 + 最小档案集
+        self.client.post("/app/api/distill/pack", json={
+            "name": "pubpkg", "corpus_dir": "测试作者/落水记"})
+        self.client.post("/app/api/distill/fingerprint", json={
+            "pack": "pubpkg", "corpus_dir": "测试作者/落水记", "exclude": []})
+        pk = S / "stylepacks" / "pubpkg"
+        (pk / "card.md").write_text("三百字精华压缩，四百字以内。", encoding="utf-8")
+        (pk / "profile.md").write_text("## 三百字精华\n占位\n", encoding="utf-8")
+        ex = "\n\n".join(f"### 范例{i}\n> 引文第{i}句，很短。\n批注\n"
+                         for i in range(1, 7))
+        (pk / "exemplars.md").write_text(ex, encoding="utf-8")
+        (pk / "lexicon.md").write_text("## 标志词\n冷\n", encoding="utf-8")
+        (pk / "limits.md").write_text("叙事【可模仿】\n", encoding="utf-8")
+        r2 = self.client.post("/app/api/distill/publish", json={
+            "pack": "pubpkg", "tier": "local",
+            "license_note": "测试许可声明"})
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.json()["path"], "stylepacks/local/pubpkg")
+        moved = S / "stylepacks" / "local" / "pubpkg"
+        self.assertTrue((moved / "pack.json").is_file())
+        meta = _json.loads((moved / "pack.json").read_text(encoding="utf-8"))
+        self.assertNotIn("status", meta, "定稿后不得再带 draft 状态")
+        self.assertEqual(meta["license_note"], "测试许可声明")
+        # 定稿后对外可见：创作页包下拉 + 装配不再拒绝
+        pr = self.client.get("/app/api/projects").json()
+        self.assertIn("local/pubpkg", [p["name"] for p in pr["packs"]])
+        ra = self.client.post("/app/api/assemble", json={
+            "project": "测试项目", "pack": "local/pubpkg",
+            "chapter_no": 1, "keywords": []})
+        self.assertNotEqual(ra.status_code, 400,
+                            "定稿包不应再被草稿守卫拒绝（404 项目缺 bible 属正常）")
 
 
 if __name__ == "__main__":
