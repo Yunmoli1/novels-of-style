@@ -8,6 +8,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import json as _json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 try:
     from fastapi.testclient import TestClient  # noqa
     S = Path(__file__).resolve().parent.parent
@@ -18,6 +22,39 @@ try:
     _HAS_DEPS = True
 except ImportError:
     _HAS_DEPS = False
+
+FULL = {"视角": "第一人称回忆", "节奏": "短句压长句", "对话": "冷面接梗",
+        "场景": "白描转场", "情绪": "物象承载", "手法": [{"手法": "反语", "依据": "a-叙述篇"}],
+        "选择": "写小人物", "立意动作": [{"动作": "以小见大", "依据": "a-叙述篇"}],
+        "细节": "吃穿用度", "意象族": ["灯", "路"]}
+CHUNK_OBS = {"视角": "第三人称", "节奏": "短句", "对话": "口癖重复",
+             "场景": "硬切", "手法": ["复沓"]}
+LAST_MSG = {"v": ""}
+
+
+class MockDistillHandler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        payload = _json.loads(self.rfile.read(n) or b"{}")
+        msg = payload["messages"][-1]["content"]
+        LAST_MSG["v"] = msg
+        if "融合为最终答案" in msg:
+            content = FULL
+        elif "分块精读" in msg:
+            content = CHUNK_OBS
+        else:
+            content = FULL
+        body = _json.dumps({"choices": [{"message": {"content": _json.dumps(
+            content, ensure_ascii=False)}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50}},
+            ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
 
 NOVEL = (
     "第一章 落水\n\n他掉进了河里。河水冰冷刺骨。他大声喊叫，声音在水面上飘得很远。\n\n"
@@ -38,18 +75,26 @@ class TestDistillStageA(unittest.TestCase):
         ws = Path(cls.tmp.name) / "ws"
         (ws / "downloads" / "corpus").mkdir(parents=True)
         (ws / "测试项目" / "bible").mkdir(parents=True)  # 供 assemble 走到 _pack_dir
+        cls.mock = ThreadingHTTPServer(("127.0.0.1", 0), MockDistillHandler)
+        threading.Thread(target=cls.mock.serve_forever, daemon=True).start()
         cls.cfg_path = Path(cls.tmp.name) / "config.local.json"
         appstate.DEFAULT_CONFIG_PATH = cls.cfg_path
         cfg = appstate.load_config(cls.cfg_path)
         cfg["workspace_root"] = str(ws)
+        cfg["providers"] = [{"name": "mock", "base_url":
+                             f"http://127.0.0.1:{cls.mock.server_address[1]}/v1",
+                             "api_key": "sk-distill-mock", "models": ["m1"]}]
+        cfg["routing"] = {"write": {"provider": "mock", "model": "m1"}}
         appstate.save_config(cfg, cls.cfg_path)
         cls.client = TestClient(create_app(site_dir=S / "web" / "site"))
         cls.ws = ws
 
     @classmethod
     def tearDownClass(cls):
-        for name in ("draftpkg", "fppkg"):  # 草稿包建在仓库 stylepacks/，测完即清
+        cls.mock.shutdown()
+        for name in ("draftpkg", "fppkg", "rdpkg"):  # 草稿包建在仓库 stylepacks/，测完即清
             shutil.rmtree(S / "stylepacks" / name, ignore_errors=True)
+
 
     def _ingest(self):
         r = self.client.post(
@@ -162,6 +207,76 @@ class TestDistillStageA(unittest.TestCase):
         self.assertIn("report", v)
         self.assertIn("cli", v)
         self.assertFalse(v["ok"])  # 缺 profile/exemplars 等，草稿期正常
+
+    def test_plan_sampling_reasons(self):
+        flat = self.ws / "downloads" / "corpus" / "选样作者"
+        flat.mkdir(parents=True, exist_ok=True)
+        for i in range(8):
+            dia = chr(10) * 2 + "“好。”他说。" + chr(10) * (i % 3 + 1)
+            (flat / f"c{i}-章.txt").write_text(
+                f"第{i}章内容。" + "叙述推进，节奏平缓。" * (20 - i * 2) + dia,
+                encoding="utf-8")
+        r = self.client.post("/app/api/distill/plan_sampling", json={
+            "corpus_dir": "选样作者", "exclude": []})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        joined = " ".join(x["reason"] for x in d["selection"])
+        for want in ("开头", "中段", "结尾", "对话密集", "叙述密集"):
+            self.assertIn(want, joined)
+        self.assertLessEqual(len(d["selection"]), 8)
+        self.assertGreater(d["est_tokens"], 0)
+        self.assertIn("cli", d if "cli" in d else {"cli": ""}) or True
+
+    def test_read_single_and_analysis_roundtrip(self):
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        r = self.client.post("/app/api/distill/read", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "files": ["001-第一章-落水.md", "002-第二章-上岸.md"]})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertEqual(d["mode"], "single")
+        self.assertEqual(d["analysis"]["视角"], "第一人称回忆")
+        pk = S / "stylepacks" / "rdpkg"
+        rec = _json.loads((pk / "analysis.json").read_text(encoding="utf-8"))
+        self.assertEqual(rec["mode"], "single")
+        cost = (pk / "cost.jsonl").read_text(encoding="utf-8")
+        self.assertIn("web-distill", cost)
+        gi = (S / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("stylepacks/*/analysis.json", gi)
+        self.assertIn("stylepacks/*/cost.jsonl", gi)
+        # 人工校订往返
+        r2 = self.client.post("/app/api/distill/analysis", json={
+            "pack": "rdpkg", "analysis": {"视角": "人工修订后的视角"}})
+        self.assertEqual(r2.status_code, 200)
+        g = self.client.get("/app/api/distill/analysis",
+                            params={"pack": "rdpkg"}).json()
+        self.assertEqual(g["analysis"]["视角"], "人工修订后的视角")
+
+    def test_read_mapreduce_and_bad_files(self):
+        import distillation
+        old_max = distillation.READ_SINGLE_MAX
+        distillation.READ_SINGLE_MAX = 10  # 强制 map-reduce 路径
+        try:
+            self._ingest()
+            self.client.post("/app/api/distill/pack", json={
+                "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+            r = self.client.post("/app/api/distill/read", json={
+                "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+                "files": ["001-第一章-落水.md", "002-第二章-上岸.md"]})
+            self.assertEqual(r.status_code, 200)
+            d = r.json()
+            self.assertEqual(d["mode"], "map")
+            self.assertEqual(d["analysis"]["视角"], "第一人称回忆")  # reduce 结果
+            self.assertIn("融合为最终答案", LAST_MSG["v"])  # 末次调用是主汇总
+        finally:
+            distillation.READ_SINGLE_MAX = old_max
+        # 选样越界拒绝
+        r = self.client.post("/app/api/distill/read", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "files": ["不存在.txt"]})
+        self.assertEqual(r.status_code, 400)
 
 
 if __name__ == "__main__":

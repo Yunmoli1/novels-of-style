@@ -72,11 +72,36 @@ python scripts/build_delta.py downloads/corpus/&lt;语料集&gt; --pack stylepac
 </div>
 
 <div class="panel">
-  <h2 style="margin-top:0">③ 采样精读 ④ 草案生成 ⑤ 逐节校订 ⑥ 定稿</h2>
-  <p class="meta">阶段 B/C（计划书：项目管理/计划书/工作台v0.7-蒸馏工作台-计划书.md）——
-  LLM 采样精读、九章草案生成、逐节校订编辑器与 validate 定稿将在后续版本点亮；
-  当前可用等价 CLI 走 style-analyze 技能流程。</p>
-  <div class="cli">技能路径：style-analyze（fp_extract → 分层采样精读 → 九章草案 → 人工校订 → validate_pack.py）</div>
+  <h2 style="margin-top:0">③ 采样精读（阶段 B · 模型调用）</h2>
+  <div class="genrow">
+    <button class="btn ghost" onclick="planSampling()">自动选样 + 成本预告</button>
+    <span id="sp_out" class="meta">按当前语料集与体检剔除名单选样。</span>
+  </div>
+  <div id="selbox" style="display:none">
+    <table class="sample" id="seltbl"></table>
+    <p class="meta" id="selpreview"></p>
+    <div class="genrow">
+      <button class="btn" id="btn_read" onclick="doRead()">开始精读</button>
+      <span id="read_out" class="meta"></span>
+    </div>
+  </div>
+  <div id="analysisbox" style="display:none">
+    <p class="meta">精读结果（analysis.json，工作数据——可编辑，草案阶段将引用；改完点保存）：</p>
+    <textarea id="analysis_ta" rows="14" style="width:100%;font:12.5px/1.5 Consolas,monospace"></textarea>
+    <div class="genrow">
+      <button class="btn ghost" onclick="saveAnalysis()">保存分析</button>
+      <span id="an_out" class="meta"></span>
+    </div>
+  </div>
+  <div class="cli">技能路径：style-analyze（分层采样精读，六问题+思想四问——网页端以写作路由完成同一流程；每判断须溯源到篇目）</div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">④ 草案生成 ⑤ 逐节校订 ⑥ 定稿</h2>
+  <p class="meta">阶段 C（计划书：项目管理/计划书/工作台v0.7-蒸馏工作台-计划书.md）——
+  九章草案生成、逐节校订编辑器与 validate 定稿将在后续版本点亮；
+  当前可用等价技能流程走 style-analyze 后半段。</p>
+  <div class="cli">技能路径：style-analyze（九章草案 → 人工逐节校订 → motif_count --write → validate_pack.py）</div>
 </div>
 
 </div><!-- /左列 -->
@@ -98,11 +123,11 @@ python scripts/build_delta.py downloads/corpus/&lt;语料集&gt; --pack stylepac
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => (s || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-let S = { exclude: new Set(), curDir: '', curPack: '' };
+let S = { exclude: new Set(), curDir: '', curPack: '', sel: [], limits: null };
 function setStep(i) {
   const steps = ['入库', '指纹体检', '精读', '草案', '校订', '定稿'];
   $('stepband').innerHTML = steps.map((n, k) =>
-    `<span class="step ${k > 1 ? 'off' : ''} ${k === i ? 'cur' : ''} ${k < i ? 'done' : ''}">${n}${k > 1 ? '（B/C 期）' : ''}</span>`).join('');
+    `<span class="step ${k > 2 ? 'off' : ''} ${k === i ? 'cur' : ''} ${k < i ? 'done' : ''}">${n}${k > 2 ? '（C 期）' : ''}</span>`).join('');
 }
 async function api(url, opt) {
   const r = await fetch(url, opt);
@@ -220,6 +245,76 @@ async function doValidate() {
     body: JSON.stringify({ pack: p }) });
   $('validate_view').innerHTML = `<pre class="meta" style="white-space:pre-wrap">${esc(d.report)}</pre>
     <p class="meta">${d.ok ? '✅ 通过' : '❌ 未通过（草稿期正常，缺档案文件而已）'}</p>`;
+}
+// ---- 阶段 B：采样精读 ----
+async function planSampling() {
+  if (!S.curDir) return alert('先在步骤②选语料集');
+  $('sp_out').textContent = '选样中……';
+  try {
+    const d = await api('/app/api/distill/plan_sampling', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ corpus_dir: S.curDir, exclude: [...S.exclude] }) });
+    S.sel = d.selection; S.limits = d.limits;
+    $('seltbl').innerHTML = `<tr><th>选用</th><th>样本</th><th>入选理由</th><th>字数</th><th>对话占比</th></tr>`
+      + d.selection.map((r, i) => `<tr>
+        <td><input type="checkbox" checked onchange="togSel(${i}, this.checked)"></td>
+        <td>${esc(r.file)}</td><td>${esc(r.reason)}</td><td>${r.chars}</td>
+        <td>${r.dialogue !== undefined ? (r.dialogue * 100).toFixed(0) + '%' : ''}</td></tr>`).join('');
+    updatePreview(d.mode, d.chunks, d.est_calls, d.est_tokens);
+    $('selbox').style.display = '';
+    $('sp_out').textContent = '';
+    setStep(2);
+  } catch (e) { $('sp_out').textContent = '失败：' + e.message; }
+}
+function togSel(i, on) { if (on) S.sel[i]._use = true; else S.sel[i]._use = false; refreshPreview(); }
+function usedSel() { return S.sel.filter(r => r._use !== false); }
+function refreshPreview() {
+  const used = usedSel();
+  const total = used.reduce((a, r) => a + (r.chars || 0), 0);
+  const single = total <= (S.limits ? S.limits.single_max : 100000);
+  const chunks = single ? 1 : Math.max(1, Math.ceil(total / (S.limits ? S.limits.chunk_chars : 60000)));
+  updatePreview(single ? 'single' : 'map', chunks, chunks,
+    Math.round(total * 0.75) + 2600 * chunks);
+}
+function updatePreview(mode, chunks, calls, tokens) {
+  $('selpreview').textContent = `预告：${usedSel().length} 篇 / `
+    + `${usedSel().reduce((a, r) => a + (r.chars || 0), 0)} 字 / `
+    + `${mode === 'single' ? '单次精读' : `map-reduce ${chunks} 块`} / `
+    + `预计 ${calls} 次调用 ≈ ${Math.round(tokens / 1000)}k tokens（写作路由）——确认后再烧`;
+}
+async function doRead() {
+  const used = usedSel();
+  if (!used.length) return alert('选样为空');
+  if (!confirm(`开始精读？${used.length} 篇 / `
+    + `${used.reduce((a, r) => a + (r.chars || 0), 0)} 字——将调用写作路由模型（见上方预告）`)) return;
+  $('btn_read').disabled = true;
+  $('read_out').textContent = '精读中（低温、JSON 输出；超 100k 自动分块）……';
+  try {
+    const d = await api('/app/api/distill/read', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: S.curPack || $('view_pack').value,
+                             corpus_dir: S.curDir,
+                             files: used.map(r => r.file) }) });
+    $('read_out').textContent = `✓ ${d.mode === 'map' ? '分块汇总' : '单次'}完成，消耗 `
+      + `${Math.round((d.usage.prompt_tokens + d.usage.completion_tokens) / 1000)}k tokens——已存 analysis.json`;
+    $('analysisbox').style.display = '';
+    $('analysis_ta').value = JSON.stringify(d.analysis, null, 2);
+    loadPack();
+  } catch (e) { $('read_out').textContent = '失败：' + e.message; }
+  $('btn_read').disabled = false;
+}
+async function saveAnalysis() {
+  const p = S.curPack || $('view_pack').value;
+  if (!p) return alert('先选包');
+  let a;
+  try { a = JSON.parse($('analysis_ta').value); }
+  catch (e) { return alert('不是合法 JSON：' + e.message); }
+  try {
+    await api('/app/api/distill/analysis', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: p, analysis: a }) });
+    $('an_out').textContent = '✓ 已保存（analysis.json）';
+  } catch (e) { $('an_out').textContent = '失败：' + e.message; }
 }
 setStep(-1);
 loadCorpus().then(loadPacks);

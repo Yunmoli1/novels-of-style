@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""routes_distill：蒸馏工作台 API（v0.7.0 阶段 A：语料入库 + 指纹 + 体检，
-零模型调用——纯脚本编排）。
+"""routes_distill：蒸馏工作台 API（v0.7.1：阶段 A 入库/指纹/体检 + 阶段 B 采样精读）。
 
 红线落实：
 - 每个写操作响应带 cli 字段 = 等价 CLI 命令（插件属性：网页流程必有 CLI 等价）；
 - 语料只允许 workspace downloads/corpus 之内（穿越防护）；
 - status:"draft" 的包不进入任何消费枚举（创作/站点/项目包下拉），
-  只能在本工作台与 /pack 预览，validate 通过并定稿后才对外可见。
+  只能在本工作台与 /pack 预览，validate 通过并定稿后才对外可见；
+- 成本纪律：精读前必走 plan_sampling 预告（N 篇/X 字/预计调用），
+  >100k 字自动 map-reduce；账本入 <包>/cost.jsonl（gitignore）。
 """
 from __future__ import annotations
 
@@ -15,12 +16,17 @@ import json
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
 import appstate
+import creation
+import distillation
+import model_client
+import routes_create as _rc
 import splib  # noqa: E402  # server.py 已把 scripts/ 加入 sys.path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -320,4 +326,170 @@ def validate_pack(body: ValidateIn):
     r = _run_script("validate_pack.py", [str(d)], timeout=300)
     return {"exit_code": r.returncode, "report": (r.stdout or "") + (r.stderr or ""),
             "ok": r.returncode == 0,
-            "cli": f"python scripts/validate_pack.py stylepacks/{d.name}"}
+            "cli": f"python scripts/validate_pack.py {_pack_rel(d)}"}
+
+
+# ---- 阶段 B：采样精读（模型调用，D3=写作路由；纪律：先预告后烧）----
+
+def _sample_rows(cfg: dict, rel: str, exclude: list[str] | None = None) -> list[dict]:
+    d = _corpus_dir(cfg, rel)
+    excl = set(exclude or [])
+    rows = []
+    stats_path = d / "stats.json"
+    if stats_path.is_file():
+        stats = splib.load_json(stats_path)
+        for ch in stats.get("chapters", []):
+            fname = ch.get("file") or ch.get("title")
+            if fname in excl:
+                continue
+            m = ch.get("metrics", {})
+            rows.append({"file": fname, "chars": ch.get("chars", 0),
+                         "sent_p50": (m.get("sentence_length") or {}).get("p50"),
+                         "dialogue": (m.get("paragraph") or {}).get("dialogue_para_ratio")})
+    else:
+        for f in splib.collect_text_files([str(d)]):
+            if f.name in excl:
+                continue
+            text, _ = splib.read_text(f)
+            m = splib.compute_metrics(text)
+            rows.append({"file": f.name, "chars": m["chars_total"],
+                         "sent_p50": m["sentence_length"]["p50"],
+                         "dialogue": m["paragraph"]["dialogue_para_ratio"]})
+    return rows
+
+
+class SamplingIn(BaseModel):
+    corpus_dir: str
+    exclude: list[str] = []
+
+
+@router.post("/plan_sampling")
+def plan_sampling(body: SamplingIn):
+    """自动选样（首/中/尾/对话密集/叙述密集，上限 8）+ 成本预告——
+    烧模型前必走此步：N 篇/X 字/预计调用与 tokens（技能 2.1 纪律网页化）。"""
+    cfg = appstate.load_config()
+    rows = _sample_rows(cfg, body.corpus_dir, body.exclude)
+    selection = distillation.plan_sampling(rows)
+    total = sum(r["chars"] or 0 for r in selection)
+    mode = "single" if total <= distillation.READ_SINGLE_MAX else "map"
+    chunks = 1 if mode == "single" else max(
+        1, -(-total // distillation.CHUNK_CHARS))
+    est_tokens = int(total * 0.75) + distillation.READ_MAX_TOKENS * chunks
+    return {"selection": selection, "total_chars": total, "mode": mode,
+            "chunks": chunks, "est_calls": chunks, "est_tokens": est_tokens,
+            "limits": {"single_max": distillation.READ_SINGLE_MAX,
+                       "chunk_chars": distillation.CHUNK_CHARS}}
+
+
+class ReadIn(BaseModel):
+    pack: str
+    corpus_dir: str
+    files: list[str] = []
+
+
+def _distill_call(cfg: dict, sid: str, prompt: str, max_tokens: int) -> dict:
+    base, key, model = _rc._resolve_model(cfg, "write")  # D3：蒸馏用写作路由
+    _rc._guard(cfg, sid, int(len(prompt) * 0.8) + max_tokens)
+    try:
+        result = model_client.chat(base, key, model,
+                                   [{"role": "system",
+                                     "content": distillation.SYSTEM_READ},
+                                    {"role": "user", "content": prompt}],
+                                   temperature=distillation.READ_TEMPERATURE,
+                                   max_tokens=max_tokens)
+    except ValueError as exc:
+        raise HTTPException(502, str(exc))
+    _rc._record_usage(sid, result)
+    return result
+
+
+def _pack_cost(pack_dir: Path, usage: dict, note: str) -> None:
+    """蒸馏账本：stylepacks/<包>/cost.jsonl（gitignore，不进仓库）。"""
+    entry = {"date": datetime.date.today().isoformat(), "skill": "web-distill",
+             "model": usage.get("model", ""),
+             "tokens": (usage.get("prompt_tokens", 0)
+                        + usage.get("completion_tokens", 0)),
+             "note": note}
+    with (pack_dir / "cost.jsonl").open("a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+@router.post("/read")
+def read_samples(body: ReadIn):
+    """精读选样（≤100k 字单次；超出自动 map-reduce）→ analysis.json（工作数据，
+    gitignore；不定稿入包）。提案是模型的，指纹/motif 数字仍是脚本的。"""
+    if not body.files:
+        raise HTTPException(400, "选样为空——先自动选样或勾选文件")
+    cfg = appstate.load_config()
+    cdir = _corpus_dir(cfg, body.corpus_dir)
+    collected = {f.name: f for f in splib.collect_text_files([str(cdir)])}
+    bad = [f for f in body.files if f not in collected]
+    if bad:
+        raise HTTPException(400, f"选样不在语料集内：{'、'.join(bad[:3])}")
+    samples = [(name, splib.read_text(collected[name])[0]) for name in body.files]
+    total = sum(len(t) for _, t in samples)
+    pack_dir = _pack_dir_checked(body.pack)
+    sid = f"distill-{uuid.uuid4().hex[:8]}"
+    usage_total: dict = {}
+    if total <= distillation.READ_SINGLE_MAX:
+        result = _distill_call(cfg, sid, distillation.read_prompt(samples),
+                               distillation.READ_MAX_TOKENS)
+        analysis = creation.extract_json(result["text"])
+        mode = "single"
+        usage_total = result
+    else:
+        chunks = distillation.chunk_files(samples)
+        obs = []
+        for chunk in chunks:
+            r = _distill_call(cfg, sid, distillation.chunk_prompt(chunk),
+                              distillation.OBS_MAX_TOKENS)
+            obs.append(creation.extract_json(r["text"]))
+        result = _distill_call(cfg, sid, distillation.reduce_prompt(obs),
+                               distillation.READ_MAX_TOKENS)
+        analysis = creation.extract_json(result["text"])
+        mode = "map"
+        usage_total = result
+    record = {"pack": pack_dir.name,
+              "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+              "mode": mode, "files": body.files, "total_chars": total,
+              "usage": {"prompt_tokens": usage_total.get("prompt_tokens", 0),
+                        "completion_tokens": usage_total.get("completion_tokens", 0),
+                        "model": usage_total.get("model", "")},
+              "analysis": analysis}
+    (pack_dir / "analysis.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
+    _pack_cost(pack_dir, record["usage"],
+               f"精读 {len(body.files)} 篇 {total} 字（{mode}）")
+    return {"ok": True, "mode": mode, "analysis": analysis,
+            "usage": record["usage"], "files": body.files,
+            "cli": "技能路径：style-analyze（分层采样精读，六问题+思想四问；"
+                   "网页端以写作路由完成同一流程）"}
+
+
+class AnalysisIn(BaseModel):
+    pack: str
+    analysis: dict
+
+
+@router.get("/analysis")
+def analysis_get(pack: str):
+    d = _pack_dir_checked(pack)
+    p = d / "analysis.json"
+    if not p.is_file():
+        raise HTTPException(404, "该包还没有精读记录（analysis.json）")
+    return splib.load_json(p)
+
+
+@router.post("/analysis")
+def analysis_save(body: AnalysisIn):
+    """人工校订后的分析存档（工作数据，可编辑重跑；不定稿入包）。"""
+    d = _pack_dir_checked(body.pack)
+    record = (splib.load_json(d / "analysis.json")
+              if (d / "analysis.json").is_file() else {})
+    record["analysis"] = body.analysis
+    record["edited_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    (d / "analysis.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
+    return {"ok": True}
