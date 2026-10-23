@@ -20,6 +20,7 @@ sys.path.insert(0, str(WEB))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import routes_create  # noqa: E402
+import routes_distill  # noqa: E402
 
 TEMPLATES = Jinja2Templates(directory=str(WEB / "templates"))
 
@@ -28,6 +29,7 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
     site = Path(site_dir) if site_dir else WEB / "site"
     app = FastAPI(title="StylePack 工作台", docs_url=None, redoc_url=None)
     app.include_router(routes_create.router)
+    app.include_router(routes_distill.router)
 
     @app.get("/app/config")
     async def config_page(request: Request):
@@ -38,6 +40,11 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
     async def create_page(request: Request):
         return TEMPLATES.TemplateResponse(
             request=request, name="create.html", context={"active": "create"})
+
+    @app.get("/app/distill")
+    async def distill_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request=request, name="distill.html", context={"active": "distill"})
 
     if (site / "index.html").is_file():
         app.mount("/", StaticFiles(directory=str(site), html=True), name="site")

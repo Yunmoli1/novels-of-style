@@ -29,9 +29,16 @@ def main() -> int:
     ap.add_argument("--genre-layers", action="store_true",
                     help="附带文体分层预览：每个输入文件的 auto 判定与分层归属"
                          "（正式写入指纹用 build_delta.py --layered）")
+    ap.add_argument("--exclude", nargs="*", default=[], metavar="NAME",
+                    help="剔除样本（文件名或 stem，可多个）——离群章剔除后重算")
     args = ap.parse_args()
 
     files = splib.collect_text_files(args.inputs)
+    if args.exclude:
+        excl = set(args.exclude)
+        kept = [f for f in files if f.stem not in excl and f.name not in excl]
+        print(f"已剔除 {len(files) - len(kept)} 个样本：{', '.join(sorted(excl))}")
+        files = kept
     if not files:
         print("错误：未找到任何 .txt/.md 文件", file=sys.stderr)
         return 2

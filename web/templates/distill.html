@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}蒸馏{% endblock %}
+{% block main %}
+<style>
+  main{max-width:1560px}
+  .d-grid{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:18px;align-items:start}
+  #pack_side{position:sticky;top:12px;max-height:calc(100vh - 30px);overflow:auto}
+  .stepband{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 12px}
+  .step{padding:2px 10px;border-radius:10px;background:var(--panel2);color:var(--muted);font-size:12.5px}
+  .step.done{color:var(--text)}
+  .step.cur{color:#10131a;background:var(--accent);font-weight:600}
+  .step.off{opacity:.4}
+  .cli{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:4px 8px;
+       font:12px/1.5 Consolas,monospace;color:var(--muted);margin-top:6px;overflow:auto;white-space:pre-wrap}
+  table.sample{width:100%;border-collapse:collapse;font-size:13px}
+  table.sample td,table.sample th{padding:3px 8px;border-bottom:1px solid var(--border);text-align:left}
+  tr.outl td{color:var(--bad)}
+  @media (max-width:1180px){.d-grid{grid-template-columns:1fr}#pack_side{position:static;max-height:none}}
+</style>
+<h1>蒸馏 · 新作者风格包</h1>
+<p class="meta">状态机：语料入库 → 指纹与体检 → 采样精读 → 草案生成 → 逐节校订 → 定稿。
+每个操作旁给出等价 CLI——网页与命令行完全等价（插件红线）；草稿包（status: draft）
+不出现在创作页与公开站点，定稿后才可见。</p>
+
+<div class="stepband" id="stepband"></div>
+
+<div class="d-grid">
+<div><!-- 左列：步骤流 -->
+
+<div class="panel">
+  <h2 style="margin-top:0">① 语料入库</h2>
+  <div class="genrow">
+    <label>作者目录 <input id="c_author" style="width:150px" placeholder="如 mo yan"></label>
+    <label>作品名 <input id="c_work" style="width:170px" placeholder="整本小说传单个 txt"></label>
+    <label>来源URL <input id="c_url" style="width:200px" placeholder="可选"></label>
+    <label><input type="checkbox" id="c_noads"> 跳过去广告</label>
+    <label><input type="checkbox" id="c_unwrap"> 合并硬换行</label>
+  </div>
+  <div class="genrow">
+    <label>选择 txt <input type="file" id="c_file" accept=".txt,.md"></label>
+    <button class="btn" onclick="doIngest()">入库</button>
+    <span id="ing_out" class="meta"></span>
+  </div>
+  <div id="ing_result"></div>
+  <p class="meta">已有语料？下方直接选语料集即可，无需重复入库。</p>
+  <div class="cli">python scripts/ingest.py --input &lt;文件&gt; --out downloads/corpus/&lt;作者&gt; --work &lt;作品&gt; [--source-url URL] [--no-strip-ads] [--unwrap]</div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">② 指纹与体检</h2>
+  <div class="genrow">
+    <label>语料集 <select id="corpus_sel" onchange="showSamples()"></select></label>
+    <button class="btn ghost" onclick="loadCorpus()">刷新语料列表</button>
+  </div>
+  <div id="samplebox" style="display:none">
+    <table class="sample" id="sampletbl"></table>
+    <p class="meta" id="samplemeta"></p>
+  </div>
+  <div class="genrow" style="margin-top:8px">
+    <label>新包名 <input id="p_name" style="width:150px" placeholder="如 moyan"></label>
+    <label>展示名 <input id="p_display" style="width:170px" placeholder="如 莫言风格包"></label>
+    <button class="btn ghost" onclick="createPack()">建草稿包</button>
+    <span id="pack_out" class="meta"></span>
+  </div>
+  <div class="genrow">
+    <button class="btn" onclick="doFingerprint()">生成/重建指纹（含离群剔除）</button>
+    <span id="fp_out" class="meta"></span>
+  </div>
+  <div id="fp_result"></div>
+  <div class="cli" id="fp_cli">python scripts/fp_extract.py downloads/corpus/&lt;语料集&gt; --json stylepacks/&lt;包&gt;/fp_extract.json
+python scripts/build_delta.py downloads/corpus/&lt;语料集&gt; --pack stylepacks/&lt;包&gt; --layered [--exclude 离群文件...]</div>
+</div>
+
+<div class="panel">
+  <h2 style="margin-top:0">③ 采样精读 ④ 草案生成 ⑤ 逐节校订 ⑥ 定稿</h2>
+  <p class="meta">阶段 B/C（计划书：项目管理/计划书/工作台v0.7-蒸馏工作台-计划书.md）——
+  LLM 采样精读、九章草案生成、逐节校订编辑器与 validate 定稿将在后续版本点亮；
+  当前可用等价 CLI 走 style-analyze 技能流程。</p>
+  <div class="cli">技能路径：style-analyze（fp_extract → 分层采样精读 → 九章草案 → 人工校订 → validate_pack.py）</div>
+</div>
+
+</div><!-- /左列 -->
+
+<aside id="pack_side" class="panel">
+  <h2 style="margin-top:0">当前包预览</h2>
+  <div class="genrow">
+    <select id="view_pack" onchange="loadPack()" style="max-width:220px"></select>
+    <button class="btn ghost" onclick="loadPacks()">刷新</button>
+    <button class="btn ghost" onclick="doValidate()">validate</button>
+  </div>
+  <div id="pack_view"></div>
+  <div id="validate_view"></div>
+  <div class="cli">python scripts/validate_pack.py stylepacks/&lt;包&gt;</div>
+</aside>
+
+</div><!-- /d-grid -->
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+let S = { exclude: new Set(), curDir: '', curPack: '' };
+function setStep(i) {
+  const steps = ['入库', '指纹体检', '精读', '草案', '校订', '定稿'];
+  $('stepband').innerHTML = steps.map((n, k) =>
+    `<span class="step ${k > 1 ? 'off' : ''} ${k === i ? 'cur' : ''} ${k < i ? 'done' : ''}">${n}${k > 1 ? '（B/C 期）' : ''}</span>`).join('');
+}
+async function api(url, opt) {
+  const r = await fetch(url, opt);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ('HTTP ' + r.status));
+  return d;
+}
+async function loadCorpus() {
+  const d = await api('/app/api/distill/corpus');
+  const opts = [];
+  (d.authors || []).forEach(a => (a.works || []).forEach(w =>
+    opts.push(`<option value="${esc(w.dir)}">${esc(a.name)} / ${esc(w.name)}（${w.samples} 样本${w.has_stats ? '，有 stats' : ''}）</option>`)));
+  $('corpus_sel').innerHTML = opts.join('') || '<option value="">（downloads/corpus 为空——先入库）</option>';
+  showSamples();
+}
+async function showSamples() {
+  const dir = $('corpus_sel').value;
+  S.curDir = dir; S.exclude = new Set();
+  $('samplebox').style.display = dir ? '' : 'none';
+  if (!dir) return;
+  const d = await api('/app/api/distill/samples?dir=' + encodeURIComponent(dir));
+  const rows = d.rows.map(r => {
+    const outl = r.outlier;
+    if (outl) S.exclude.add(r.file);
+    return `<tr class="${outl ? 'outl' : ''}">
+      <td><input type="checkbox" ${outl ? 'checked' : ''} onchange="togExcl('${esc(r.file)}', this.checked)"></td>
+      <td>${esc(r.file)}</td><td>${r.chars}</td>
+      <td>${r.sent_p50}${r.sent_p50_z !== undefined ? '（z ' + r.sent_p50_z + '）' : ''}</td>
+      <td>${r.dialogue !== undefined ? (r.dialogue * 100).toFixed(0) + '%' : ''}${r.dialogue_z !== undefined ? '（z ' + r.dialogue_z + '）' : ''}</td></tr>`;
+  }).join('');
+  $('sampletbl').innerHTML = `<tr><th>剔除</th><th>样本</th><th>字数</th><th>句长 P50</th><th>对话段占比</th></tr>` + rows;
+  $('samplemeta').textContent = d.outliers
+    ? `⚠ ${d.outliers} 个离群样本已预勾选（z≥2）——确认后重建指纹即剔除；也可手动增减`
+    : '未发现离群样本（z≥2）。';
+  setStep(1);
+}
+function togExcl(f, on) { on ? S.exclude.add(f) : S.exclude.delete(f); }
+async function doIngest() {
+  const f = $('c_file').files[0];
+  if (!f) return alert('先选 txt 文件');
+  if (!$('c_author').value.trim()) return alert('先填作者目录名');
+  $('ing_out').textContent = '入库中……';
+  const q = new URLSearchParams({ author: $('c_author').value.trim(),
+    work: $('c_work').value.trim(), source_url: $('c_url').value.trim(),
+    no_strip_ads: $('c_noads').checked, unwrap: $('c_unwrap').checked,
+    filename: f.name });
+  try {
+    const d = await api('/app/api/distill/ingest?' + q.toString(),
+                        { method: 'POST', body: f });
+    $('ing_out').textContent = `✓ ${d.chapters} 章 / ${d.chars} 字（原编码 ${d.encoding}，去广告 ${d.ads_removed} 行）`;
+    $('ing_result').innerHTML = `<p class="meta">目录：${esc(d.dir)}</p><div class="cli">${esc(d.cli)}</div>`;
+    loadCorpus(); setStep(1);
+  } catch (e) { $('ing_out').textContent = '失败：' + e.message; }
+}
+async function createPack() {
+  const name = $('p_name').value.trim();
+  if (!name) return alert('先填包名');
+  try {
+    const d = await api('/app/api/distill/pack', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, display_name: $('p_display').value.trim(),
+                             corpus_dir: S.curDir }) });
+    $('pack_out').textContent = d.reused ? `复用草稿包 ${d.name}` : `草稿包已建 ${d.name}`;
+    S.curPack = d.name;
+    loadPacks(); loadPack();
+  } catch (e) { $('pack_out').textContent = '失败：' + e.message; }
+}
+async function doFingerprint() {
+  if (!S.curPack) { S.curPack = $('p_name').value.trim(); }
+  if (!S.curPack) return alert('先建草稿包（或填包名）');
+  if (!S.curDir) return alert('先选语料集');
+  $('fp_out').textContent = '计算中（fp_extract + build_delta --layered）……';
+  try {
+    const d = await api('/app/api/distill/fingerprint', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pack: S.curPack, corpus_dir: S.curDir,
+                             exclude: [...S.exclude] }) });
+    $('fp_out').textContent = `✓ 样本 ${d.n_samples} 个（剔除 ${d.excluded.length}）`;
+    const layers = d.layers.map(l =>
+      `<li>${esc(l.genre)}：${l.n} 篇（${esc((l.samples || []).slice(0, 6).join('、'))}${l.n > 6 ? '…' : ''}）</li>`).join('');
+    const sc = d.self_check.map(s =>
+      `<li>${esc(s.genre)}：${s.calibratable ? 'delta_max=' + s.delta_max : '留一线不可标定（n&lt;3）'}</li>`).join('');
+    $('fp_result').innerHTML = `<p class="meta">分层归属：</p><ul class="meta">${layers}</ul>
+      <p class="meta">留一及格线：</p><ul class="meta">${sc}</ul>
+      <div class="cli">${esc(d.cli)}</div>`;
+    loadPack();
+  } catch (e) { $('fp_out').textContent = '失败：' + e.message; }
+}
+async function loadPacks() {
+  try {
+    const d = await api('/app/api/distill/packs');
+    $('view_pack').innerHTML = (d.packs || []).map(p =>
+      `<option value="${esc(p)}">${esc(p)}${S.curPack === p ? ' ✓' : ''}</option>`).join('')
+      || '<option value="">（无包）</option>';
+    if (S.curPack) $('view_pack').value = S.curPack;
+    loadPack();
+  } catch (e) {}
+}
+async function loadPack() {
+  const p = $('view_pack').value;
+  if (!p) { $('pack_view').innerHTML = '<p class="meta">无包</p>'; return; }
+  const d = await api('/app/api/distill/pack?pack=' + encodeURIComponent(p));
+  S.curPack = d.name;
+  $('pack_view').innerHTML = `<p><strong>${esc(d.display_name || d.name)}</strong>
+    ｜v${esc(d.version)}｜<span class="meta">${d.status === 'draft' ? '草稿（未定稿，创作页/站点不可见）' : '已定稿'}</span></p>
+    <p class="meta">文件：${(d.files || []).map(esc).join('、') || '（空）'}</p>
+    <p class="meta">语料：${esc((d.corpus || {}).confidence || '')}</p>`;
+}
+async function doValidate() {
+  const p = $('view_pack').value;
+  if (!p) return alert('先选包');
+  $('validate_view').innerHTML = '<p class="meta">校验中……</p>';
+  const d = await api('/app/api/distill/validate', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ pack: p }) });
+  $('validate_view').innerHTML = `<pre class="meta" style="white-space:pre-wrap">${esc(d.report)}</pre>
+    <p class="meta">${d.ok ? '✅ 通过' : '❌ 未通过（草稿期正常，缺档案文件而已）'}</p>`;
+}
+setStep(-1);
+loadCorpus().then(loadPacks);
+</script>
+{% endblock %}

@@ -52,9 +52,16 @@ def main() -> int:
     ap.add_argument("--top-n", type=int, default=150)
     ap.add_argument("--layered", action="store_true",
                     help="按文体分层重建：genres 阈值树 + 分层 delta_profile + 层内留一 self_check")
+    ap.add_argument("--exclude", nargs="*", default=[], metavar="NAME",
+                    help="剔除样本（文件名或 stem，可多个）——离群章剔除后重算")
     args = ap.parse_args()
 
     files = splib.collect_text_files([args.corpus])
+    if args.exclude:
+        excl = set(args.exclude)
+        kept = [f for f in files if f.stem not in excl and f.name not in excl]
+        print(f"已剔除 {len(files) - len(kept)} 个样本：{', '.join(sorted(excl))}")
+        files = kept
     if len(files) < 1:
         print("错误：语料目录没有文本文件", file=sys.stderr)
         return 2
@@ -63,7 +70,7 @@ def main() -> int:
 
     pack = Path(args.pack)
     fp_path = pack / "fingerprint.json"
-    fingerprint = splib.load_json(fp_path)
+    fingerprint = splib.load_json(fp_path) if fp_path.is_file() else {}  # 全新包目录直接可用
     fingerprint["delta_profile"] = profile
     fingerprint.setdefault("notes", "")
     loo = None

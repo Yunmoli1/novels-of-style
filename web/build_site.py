@@ -420,14 +420,23 @@ def render_canon_page(name: str, pack_dir: Path) -> str:
 
 def iter_packs(repo: Path) -> list[tuple[Path, bool]]:
     """作者风格包唯一家园枚举：stylepacks/ 顶层 = 公版层；stylepacks/local/ = 本地层。
-    死规矩（风格包统一管理-执行规划）：一切消费者只从这里枚举。"""
+    死规矩（风格包统一管理-执行规划）：一切消费者只从这里枚举。
+    status:"draft"（蒸馏台草稿）不进站点——公开面只见定稿包。"""
     packs_dir = repo / "stylepacks"
+
+    def _published(d: Path) -> bool:
+        try:
+            return json.loads((d / "pack.json").read_text(encoding="utf-8")
+                              ).get("status") != "draft"
+        except (OSError, ValueError):
+            return True  # 无 status 视为已发布（向后兼容旧包）
+
     out = [(d, False) for d in sorted(packs_dir.iterdir())
-           if d.is_dir() and (d / "pack.json").is_file()]
+           if d.is_dir() and (d / "pack.json").is_file() and _published(d)]
     local = packs_dir / "local"
     if local.is_dir():
         out += [(d, True) for d in sorted(local.iterdir())
-                if d.is_dir() and (d / "pack.json").is_file()]
+                if d.is_dir() and (d / "pack.json").is_file() and _published(d)]
     return out
 
 

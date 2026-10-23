@@ -2,6 +2,24 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.7.0] - 2026-10-23
+
+### Added
+- **蒸馏工作台阶段 A**（计划书：项目管理/计划书/工作台v0.7-蒸馏工作台-计划书.md；
+  /app/distill，六步状态机，本版点亮前两步，全程零模型调用）：
+  - 语料浏览/入库：downloads/corpus 作者与作品识别（长篇 chapters 布局 +
+    短篇平铺布局）；raw-body 上传调 ingest.py，返回章节数/字数/编码/去广告行数
+  - 指纹与体检：fp_extract + build_delta --layered 编排；逐样本指标表 +
+    **离群 z≥2 自动预勾选剔除**（有 stats 读缓存，平铺语料现场计算）→
+    剔除重建指纹（fp_extract/build_delta 新增 `--exclude`）
+  - **草稿包（status: draft）**：蒸馏台一键建包 scaffold；三处消费枚举过滤
+    （创作页包下拉、装配入口 400 拒绝、包浏览站点 iter_packs）；
+    validate_pack 对全新包可用（build_delta 不再要求 fingerprint.json 预存）
+  - 每个操作响应带等价 CLI 命令；侧栏当前包预览 + validate 面板
+  - 真语料验收：downloads/corpus/luxun 62 篇平铺——5 个离群自动标出，
+    剔除后 57 样本重建，essay 26/narrative 31 双层留一线均标定
+- 阶段 B（采样精读 LLM 化）/ 阶段 C（草案生成+定稿）见计划书，后续版本
+
 ## [0.6.8] - 2026-10-23
 
 ### Fixed

@@ -57,6 +57,13 @@ def _pack_dir(pack: str) -> Path:
     d = (STYLEPACKS / pack).resolve()
     if not (d / "pack.json").is_file():
         raise HTTPException(404, f"风格包不存在或无 pack.json：{pack}")
+    meta = {}
+    try:
+        meta = json.loads((d / "pack.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+    if meta.get("status") == "draft":  # v0.7.0：蒸馏台草稿包不得用于创作
+        raise HTTPException(400, f"包 {pack} 仍是草稿（蒸馏台未定稿）——不能用于创作")
     return d
 
 
@@ -203,18 +210,26 @@ def test_connection(body: TestIn):
 def projects():
     cfg = appstate.load_config()
 
-    def _pack_entry(name: str, d: Path) -> dict:
+    def _pack_entry(name: str, d: Path) -> dict | None:
+        try:
+            meta = json.loads((d / "pack.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        if meta.get("status") == "draft":  # v0.7.0：草稿包不进创作页下拉
+            return None
         return {"name": name, "version": _pack_version(d)}
 
+    packs = [e for e in (_pack_entry(d.name, d) for d in sorted(STYLEPACKS.iterdir())
+                         if d.is_dir() and (d / "pack.json").is_file()
+                         and d.name != "local") if e]
+    local = STYLEPACKS / "local"
+    if local.is_dir():
+        packs += [e for e in (_pack_entry(f"local/{d.name}", d)
+                              for d in sorted(local.iterdir())
+                              if d.is_dir() and (d / "pack.json").is_file()) if e]
     return {"workspace_root": str(_ws_root(cfg)),
             "projects": appstate.discover_projects(_ws_root(cfg)),
-            "packs": [_pack_entry(d.name, d) for d in sorted(STYLEPACKS.iterdir())
-                      if d.is_dir() and (d / "pack.json").is_file()
-                      and d.name != "local"]
-            + ([_pack_entry(f"local/{d.name}", d)
-                for d in sorted(local_dir.iterdir())
-                if d.is_dir() and (d / "pack.json").is_file()]
-               if (local_dir := STYLEPACKS / "local").is_dir() else [])}
+            "packs": packs}
 
 
 class AssembleIn(BaseModel):
