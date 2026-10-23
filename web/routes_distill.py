@@ -579,10 +579,13 @@ def gen_draft(body: GenDraftIn):
         encoding="utf-8", newline="\n")
 
     # 3) card/lexicon/limits 三件套（JSON 包装）
-    top_chars = []
+    top_chars: list[str] = []
     fp_ext = d / "fp_extract.json"
     if fp_ext.is_file():
-        top_chars = list((splib.load_json(fp_ext).get("top_chars") or {}).keys())
+        tc = splib.load_json(fp_ext).get("top_chars") or []
+        # fp_extract 的 top_chars 是 [{char, per_1k}...] 列表（真语料实测形态）
+        top_chars = ([x.get("char", "") for x in tc if isinstance(x, dict)]
+                     if isinstance(tc, list) else list(tc.keys()))
     trio = creation.extract_json(call(
         "card+lexicon+limits",
         distillation.trio_prompt(analysis, top_chars, ex_md),

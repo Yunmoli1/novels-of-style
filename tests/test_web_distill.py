@@ -371,6 +371,28 @@ class TestDistillStageA(unittest.TestCase):
             "pack": "draftpkg", "corpus_dir": "测试作者/落水记"})
         self.assertEqual(r2.status_code, 404)
 
+    def test_gen_draft_top_chars_list_shape(self):
+        """真语料回归（v0.7.2 验收实测）：fp_extract.json 的 top_chars 是
+        [{char, per_1k}...] 列表——mock 流程没写该文件故未暴露 .keys() 崩溃。"""
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        self.client.post("/app/api/distill/read", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "files": ["001-第一章-落水.md", "002-第二章-上岸.md"]})
+        pk = S / "stylepacks" / "rdpkg"
+        (pk / "fp_extract.json").write_text(_json.dumps(
+            {"top_chars": [{"char": "的", "per_1k": 37.4},
+                           {"char": "了", "per_1k": 18.0}]}, ensure_ascii=False),
+            encoding="utf-8")
+        r = self.client.post("/app/api/distill/gen_draft", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "include_thought": False})
+        self.assertEqual(r.status_code, 200)
+        # trio 调用（include_thought=False 时为最后一次）提示词应含高频字段与实测字
+        self.assertIn("高频字", LAST_MSG["v"])
+        self.assertIn("的、了", LAST_MSG["v"])
+
     def test_file_edit_roundtrip_and_whitelist(self):
         self._ingest()
         self.client.post("/app/api/distill/pack", json={

@@ -4,6 +4,11 @@
 
 ## [0.7.2] - 2026-10-23
 
+> **真模型全流程验收（luxun 62 篇 → local/luxun-webtest v0.1.2）**：精读
+> 溯源逐篇、范例引文零剔除、motif 全剔经校订改高频单字后保留 看/眼；指纹
+> 核心指标与手作包一致（句长 P50 同 19.0），未入选篇《药》双包 fp_check
+> 均过。明细见 evals/calibration.json → web_distill_v072。
+
 ### Added
 - **蒸馏工作台阶段 C：草案生成 + 逐节校订 + 定稿**（计划书阶段 C；步 ④⑤⑥
   点亮，"加新作者"全流程闭环）：
@@ -19,6 +24,9 @@
   - 成本预告先行（/preview_draft），账本入 <包>/cost.jsonl
 
 ### Fixed
+- **gen_draft 的 top_chars 解析**（真语料验收实测）：fp_extract.json 的
+  top_chars 是 [{char, per_1k}...] 列表而非字典，`.keys()` 崩溃——mock 流程
+  未写该文件故未暴露；已兼容两形态并加回归锁（测试 160+9）
 - **build_delta --layered 补写顶层混合 metrics（derive_thresholds 带容差）
   + reference 实测快照**——此前分层指纹只有 genres 层有容差叶，顶层恒缺，
   新蒸馏包永远过不了 validate（"带容差的指标叶仅 0 个"）；手作包系人工补写，
