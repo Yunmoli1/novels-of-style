@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 import splib  # noqa: E402  (web/ 已把 scripts/ 加入 sys.path)
@@ -110,6 +111,29 @@ def assemble(project_dir: Path, pack_dir: Path, chapter_no: int,
             items.append({"kind": "章节锚定·上一章结尾",
                           "source": f"manuscript/{latest.name}", "text": text,
                           "trimmable": True})
+
+    # 记忆·前情提要（v0.9.0）：MCP 同源 Store 的 recap——最近章摘要+未回收伏笔。
+    # 无 db / 空库（新项目、未走记忆登记）静默跳过，装配行为不变。
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "server"))
+        from store import Store  # noqa: E402 —— 延迟导入，无 server/ 时跳过
+        store = Store(project_dir)
+        try:
+            recap = store.recap(3)
+        finally:
+            store.close()
+        if recap.get("recent") or recap.get("open_foreshadow"):
+            lines = [f"第{r['chapter']}章摘要：{r['digest']}"
+                     for r in recap["recent"]]
+            if recap["open_foreshadow"]:
+                lines.append("未回收伏笔：" + "；".join(
+                    f"{r['title']}（第{r['planted_chapter']}章埋）"
+                    for r in recap["open_foreshadow"]))
+            items.append({"kind": "记忆·前情提要",
+                          "source": "style/memory.db（recap）",
+                          "text": "\n".join(lines)[:1200], "trimmable": True})
+    except Exception:  # noqa: BLE001 —— 记忆是增强，绝不阻断装配
+        pass
 
     # 预算裁剪：只裁 trimmable，从后往前
     def tok(x: dict) -> int:

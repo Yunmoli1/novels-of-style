@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import appstate  # noqa: E402
 import routes_create  # noqa: E402
 import routes_distill  # noqa: E402
+import routes_memory  # noqa: E402
 
 TEMPLATES = Jinja2Templates(directory=str(WEB / "templates"))
 
@@ -31,6 +32,7 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
     app = FastAPI(title="StylePack 工作台", docs_url=None, redoc_url=None)
     app.include_router(routes_create.router)
     app.include_router(routes_distill.router)
+    app.include_router(routes_memory.router)
 
     @app.get("/app/config")
     async def config_page(request: Request):

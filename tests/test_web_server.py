@@ -103,6 +103,13 @@ class MockHandler(BaseHTTPRequestHandler):
                     "usage": {"prompt_tokens": 100, "completion_tokens": 50}})
 
     def _content_for(self, user_msg):
+        if "记忆登记项" in user_msg:  # v0.9.0 记忆 digest 提取（judge 路由）
+            return json.dumps({"digest": "他钓上会说话的鱼，被绑定。",
+                               "changes": [{"entity": "韩天宇",
+                                            "field": "possession",
+                                            "value": "持有大比目鱼",
+                                            "note": "绑定情节"}],
+                               "foreshadow": ["鱼的来历之谜"]}, ensure_ascii=False)
         if "验收报告" in user_msg:
             return PROSE_REVISED
         if "只输出正文本身" in user_msg:
@@ -698,6 +705,46 @@ class TestWebServer(unittest.TestCase):
                               params={"project": "测试项目"}).json()["slots"]
         self.assertEqual(len(lst[sid - 1]["drafts"]), 2)
         self.assertEqual(lst[sid - 1]["drafts"][1]["label"], "批2·稿1")
+
+    def test_memory_delta_merge_recap_assembly(self):
+        """v0.9.0 记忆接入：交付登记（judge 提取+脚本风险分级）→ 隔离区分组 →
+        低风险直合并/中高 force → recap 前情 → 装配注入"记忆·前情提要"块。"""
+        base = {"project": "测试项目"}
+        r = self.client.post("/app/api/memory/delta", json={
+            **base, "chapter_no": 3, "title": "夜谈", "text": PROSE,
+            "beats": BEATS["beats"], "session_id": "mem1"})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertTrue(d["proposed"])
+        self.assertTrue({x["risk"] for x in d["proposed"]})  # 脚本自动分级
+        pend = self.client.get("/app/api/memory/pending",
+                               params={"project": "测试项目"}).json()
+        self.assertGreaterEqual(pend["total"], 2)  # digest + change + 伏笔
+        all_ids = [it["id"] for g in pend["groups"].values() for it in g]
+        m1 = self.client.post("/app/api/memory/merge",
+                              json={**base, "ids": all_ids, "force": False}).json()
+        self.assertTrue(m1.get("blocked"), "中/高风险应被 force 门挡住")
+        m2 = self.client.post("/app/api/memory/merge",
+                              json={**base, "ids": all_ids, "force": True}).json()
+        self.assertTrue(m2.get("merged"))
+        pend2 = self.client.get("/app/api/memory/pending",
+                                params={"project": "测试项目"}).json()
+        self.assertEqual(pend2["total"], 0, "合并后隔离区应清空")
+        rec = self.client.get("/app/api/memory/recap",
+                              params={"project": "测试项目", "n": 3}).json()
+        self.assertTrue(any("会说话的鱼" in r0["digest"] for r0 in rec["recent"]))
+        self.assertTrue(any("鱼的来历" in f["title"]
+                            for f in rec["open_foreshadow"]))
+        a = self.client.post("/app/api/assemble", json={
+            "project": "测试项目", "pack": "luxun", "chapter_no": 4,
+            "keywords": []}).json()
+        kinds = [i["kind"] for i in a["items"]]
+        self.assertIn("记忆·前情提要", kinds)
+        self.assertTrue(any("鱼的来历" in i["excerpt"] for i in a["items"]
+                            if i["kind"] == "记忆·前情提要"))
+        bad = self.client.get("/app/api/memory/pending",
+                              params={"project": "../stylepacks"})
+        self.assertEqual(bad.status_code, 400)
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

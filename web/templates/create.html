@@ -89,6 +89,12 @@
     <button class="btn" onclick="doSave()">确认交付（落盘 manuscript + sessions）</button>
     <span id="save_out" class="meta"></span>
   </div>
+  <div class="panel" id="memorybox" style="display:none">
+    <h3 style="margin:4px 0">记忆·隔离区</h3>
+    <p class="meta">交付后自动登记本章摘要/状态变更/伏笔（judge 路由，风险由脚本分级）。
+      低风险直接合并；<span style="color:var(--bad)">高风险=core 实体变动/伏笔，须逐条确认</span>；确认后下一章装配自动带前情。</p>
+    <div id="mem_list"></div>
+  </div>
 </aside>
 
 </div><!-- /create-grid -->
@@ -623,6 +629,57 @@ async function doSave() {
       ? `｜本章累计 ${Math.round(r.session_totals.tokens / 1000)}k tokens / ${r.session_totals.calls} 次调用`
       : '');
   setStage(5);
+  memoryDelta();  // 交付后自动登记（隔离区）
+}
+// ---- 记忆·隔离区（v0.9.0）----
+async function memoryDelta() {
+  const i = +$('pick').value;
+  const d = S.drafts[i];
+  if (!d || !S.beats.length) return;
+  try {
+    const r = await post('/app/api/memory/delta', {
+      project: $('project').value, chapter_no: +$('chapter_no').value,
+      title: $('title').value || '未命名', text: d.text, beats: S.beats,
+      session_id: S.session_id });
+    $('memorybox').style.display = '';
+    $('save_out').innerHTML += `｜已登记记忆 ${r.proposed.length} 条（隔离区）`;
+    loadPending();
+  } catch (e) {
+    $('memorybox').style.display = '';
+    $('mem_list').innerHTML = `<p class="meta">登记失败：${e.message}（可稍后手动重试交付或忽略）</p>`;
+  }
+}
+async function loadPending() {
+  try {
+    const v = await (await fetch('/app/api/memory/pending?project='
+      + encodeURIComponent($('project').value))).json();
+    if (!v.total) {
+      $('mem_list').innerHTML = '<p class="meta">隔离区为空（低风险项已合并或无变更）。</p>';
+      return;
+    }
+    const row = it => `<div class="genrow"><code>${esc(it.entity)}.${esc(it.field)}</code>
+      <span class="meta">${esc(it.value)}</span>
+      <button class="btn ghost" onclick="memMerge(${it.id}, false)">合并</button>
+      <button class="btn ghost" onclick="memMerge(${it.id}, true)">确认高风险合并</button></div>`;
+    let html = '';
+    for (const [rk, label] of [['high', '🔴 高风险（逐条确认）'],
+                                ['medium', '🟡 中风险'], ['low', '🟢 低风险（可直接合并）']]) {
+      const g = (v.groups[rk] || []);
+      if (g.length)
+        html += `<p class="meta">${label} ${g.length} 条</p>` + g.map(row).join('');
+    }
+    $('mem_list').innerHTML = html;
+  } catch (e) { $('mem_list').innerHTML = '<p class="meta">' + e.message + '</p>'; }
+}
+async function memMerge(id, force) {
+  if (force && !confirm('确认合并该高风险变更？（core 实体变动/伏笔，将写入正式记忆）')) return;
+  try {
+    const r = await post('/app/api/memory/merge', {
+      project: $('project').value, ids: [id], force });
+    if (r.blocked && r.blocked.length)
+      alert('该条为中/高风险，须点"确认高风险合并"');
+    loadPending();
+  } catch (e) { alert(e.message); }
 }
 init();
 </script>

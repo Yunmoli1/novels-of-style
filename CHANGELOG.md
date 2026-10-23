@@ -2,6 +2,23 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.9.0] - 2026-10-24
+
+### Added
+- **记忆接入创作环**（v0.9 计划书阶段 A；对标 NovelCrafter Codex
+  progression——复用自家 MCP 记忆层，零协议发明）：
+  - POST /app/api/memory/delta：交付后自动登记——judge 路由从正文+拍子提取
+    digest/状态变更/伏笔（每章 ~2k tokens），Store.propose_delta 入隔离区；
+    **风险由脚本 _auto_risk 分级**（core 实体=high），不由模型自评
+  - GET /memory/pending：隔离区按风险分组视图（🔴逐条确认/🟡批量/🟢直并）
+    + 老化提醒；POST /memory/merge：中/高风险 force 门（UI 双按钮）
+  - **装配自动带前情**：assemble 注入"记忆·前情提要"块（最近 3 章摘要+
+    未回收伏笔，来源 style/memory.db·recap，预算可裁、预览可见）——
+    立意/拍子/正文提示词自然获得；无 db 新项目行为不变
+  - 交付后自动 sync（bible→索引保鲜）；CLI 等价 = MCP 工具原样
+    （story.propose_delta/merge_delta/recap/sync）
+  - digest 提示词纪律：只登记正文实际发生的变更，绝不推测补设定
+
 ## [0.8.0] - 2026-10-24
 
 ### Added

@@ -197,3 +197,30 @@ def ending_check_prompt(title: str, draft_tail: str) -> str:
 
 ——结尾段——
 {draft_tail}"""
+
+
+def memory_digest_prompt(chapter_no: int, title: str, beats: list[dict],
+                         text: str) -> str:
+    """交付后登记提取（judge 路由）：digest/状态变更/伏笔。
+    只提取正文与拍子中**实际发生**的内容——不推测、不补设定；
+    风险分级由脚本判定（不由模型自评）。"""
+    beat_lines = chr(10).join(f"拍{b.get('no')}：{b.get('beat', '')[:80]}"
+                              for b in beats)
+    return f"""从第 {chapter_no} 章《{title}》正文与拍子中提取记忆登记项。
+
+只输出 JSON：
+{{"digest": "本章 120 字内摘要（给下一章当前情）",
+  "changes": [{{"entity": "人物/地点/物件名（用文中出现的名字）",
+                "field": "state/location/possession/mood/关系类字段",
+                "value": "本章之后的新状态（≤60 字）",
+                "note": "依据（引用或指认情节，≤60 字）"}}],
+  "foreshadow": ["本章埋下待回收的钩子标题（≤20 字，无则空数组）"]}}
+
+纪律：只登记**本章实际发生**的变更——没有就给空数组，绝不推测或补设定；
+entity 用正文原文名（不用代词）。
+
+——拍子表——
+{beat_lines}
+
+——正文——
+{text[:6000]}"""
