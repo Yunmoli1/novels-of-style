@@ -656,6 +656,49 @@ class TestWebServer(unittest.TestCase):
         r2 = self.client.get("/app/api/presets", params={"pack": "luxun"})
         self.assertEqual(r2.json()["anchors"], ["无"])  # 无项目 → 只有兜底
 
+    def test_version_in_footer_and_next_chapter(self):
+        """v0.7.3：页脚版本号（防旧实例事故）+ 章节号推荐（防锚定失效）。"""
+        r = self.client.get("/app/create")
+        self.assertIn("v0.", r.text)
+        r2 = self.client.get("/app/config")
+        self.assertIn("v0.", r2.text)
+        ms = Path(self.tmp.name) / "ws" / "章节推荐项目" / "manuscript"
+        ms.mkdir(parents=True)  # 独立项目：不与其他测试的交付互相污染
+        (ms / "001-开局.md").write_text("x", encoding="utf-8")
+        (ms / "005-未来章.md").write_text("x", encoding="utf-8")
+        n = self.client.get("/app/api/next_chapter",
+                            params={"project": "章节推荐项目"}).json()
+        self.assertEqual(n["next"], 6)  # max=5 → 推荐 6
+        bad = self.client.get("/app/api/next_chapter",
+                              params={"project": "不存在项目"})
+        self.assertEqual(bad.status_code, 404)
+        bad = self.client.get("/app/api/next_chapter",
+                              params={"project": "../stylepacks"})
+        self.assertEqual(bad.status_code, 400)
+
+    def test_slot_batches_persist_roundtrip(self):
+        """v0.7.3 批次落盘：update 带 drafts → slots 列表可读回 → 恢复依据。"""
+        cap = {"project": "测试项目", "pack": "luxun", "chapter_no": 9,
+               "keywords": [], "target_chars": 0, "title": "批次"}
+        r = self.client.post("/app/api/slots/capture", json=cap).json()
+        sid = r["slot"]["id"]
+        self.assertEqual(r["slot"]["drafts"], [])
+        batches = [
+            {"batch": 1, "label": "批1·稿1", "text": PROSE,
+             "usage": {"completion_tokens": 50}, "fp_check": None,
+             "borrow_check": None, "revision": 0},
+            {"batch": 2, "label": "批2·稿1", "text": PROSE_REVISED,
+             "usage": {"completion_tokens": 60}, "fp_check": None,
+             "borrow_check": None, "revision": 1}]
+        u = self.client.post("/app/api/slots/update", json={
+            "project": "测试项目", "slot_id": sid, "drafts": batches,
+            "latest_draft": batches[-1]})
+        self.assertEqual(u.status_code, 200)
+        lst = self.client.get("/app/api/slots",
+                              params={"project": "测试项目"}).json()["slots"]
+        self.assertEqual(len(lst[sid - 1]["drafts"]), 2)
+        self.assertEqual(lst[sid - 1]["drafts"][1]["label"], "批2·稿1")
+
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)
         cfg["routing"]["write"] = None

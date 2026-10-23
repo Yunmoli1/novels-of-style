@@ -12,5 +12,5 @@
 <a href="/app/create" {% if active == 'create' %}class="active"{% endif %}>创作</a>
 <a href="/app/distill" {% if active == 'distill' %}class="active"{% endif %}>蒸馏</a>
 </nav><main>{% block main %}{% endblock %}
-<footer>本地工作台 · 仅监听 127.0.0.1 · key 只存服务端 · sessions 不入库</footer>
+<footer>本地工作台 v{{ version or '?' }} · 仅监听 127.0.0.1 · key 只存服务端 · sessions 不入库</footer>
 </main></div></body></html>

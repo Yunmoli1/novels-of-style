@@ -115,7 +115,14 @@ def main() -> int:
     if full_mode:
         from server import create_app
         app = create_app(site_dir=site)
-        print(f"StylePack 工作台已启动：{url}")
+        try:
+            import appstate
+            ver = appstate.workbench_version()
+        except Exception:
+            ver = "?"
+        print(f"StylePack 工作台 v{ver} 已启动：{url}")
+        print(f"（若浏览器没自动打开，手动访问该地址；端口被占用时会自动顺延，"
+              f"以本行显示为准——页脚也标了版本，两处对不上=旧实例没关干净）")
         print("全模式：判读/浏览/canon + 模型配置 + 创作环。"
               "仅监听本机（127.0.0.1），数据不出机器；按 Ctrl+C 停止。")
         if not args.no_open:

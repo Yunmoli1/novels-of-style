@@ -371,6 +371,40 @@ class TestDistillStageA(unittest.TestCase):
             "pack": "draftpkg", "corpus_dir": "测试作者/落水记"})
         self.assertEqual(r2.status_code, 404)
 
+    def test_job_start_and_poll(self):
+        """v0.7.3 job 化：start 返回 job_id，轮询到 done 且 result 与同步版等价；
+        未知 job 404。"""
+        import time as _t
+        self._ingest()
+        self.client.post("/app/api/distill/pack", json={
+            "name": "rdpkg", "corpus_dir": "测试作者/落水记"})
+        st = self.client.post("/app/api/distill/read_start", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "files": ["001-第一章-落水.md", "002-第二章-上岸.md"]}).json()
+        self.assertIn("job_id", st)
+        job = None
+        for _ in range(50):  # mock 秒回，50×0.1s 足够
+            job = self.client.get(f"/app/api/distill/job/{st['job_id']}").json()
+            if job["status"] != "running":
+                break
+            _t.sleep(0.1)
+        self.assertEqual(job["status"], "done", str(job.get("error"))[:200])
+        self.assertIn("step", job)
+        self.assertEqual(job["result"]["mode"], "single")
+        self.assertIn("视角", job["result"]["analysis"])
+        g = self.client.post("/app/api/distill/gen_draft_start", json={
+            "pack": "rdpkg", "corpus_dir": "测试作者/落水记",
+            "include_thought": False}).json()
+        for _ in range(100):
+            job2 = self.client.get(f"/app/api/distill/job/{g['job_id']}").json()
+            if job2["status"] != "running":
+                break
+            _t.sleep(0.1)
+        self.assertEqual(job2["status"], "done", str(job2.get("error"))[:200])
+        self.assertIn("quotes_dropped", job2["result"])
+        miss = self.client.get("/app/api/distill/job/nope")
+        self.assertEqual(miss.status_code, 404)
+
     def test_gen_draft_top_chars_list_shape(self):
         """真语料回归（v0.7.2 验收实测）：fp_extract.json 的 top_chars 是
         [{char, per_1k}...] 列表——mock 流程没写该文件故未暴露 .keys() 崩溃。"""

@@ -323,17 +323,20 @@ async function doRead() {
   if (!confirm(`开始精读？${used.length} 篇 / `
     + `${used.reduce((a, r) => a + (r.chars || 0), 0)} 字——将调用写作路由模型（见上方预告）`)) return;
   $('btn_read').disabled = true;
-  $('read_out').textContent = '精读中（低温、JSON 输出；超 100k 自动分块）……';
+  $('read_out').textContent = '启动精读 job……';
   try {
-    const d = await api('/app/api/distill/read', {
+    const st = await api('/app/api/distill/read_start', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ pack: S.curPack || $('view_pack').value,
                              corpus_dir: S.curDir,
                              files: used.map(r => r.file) }) });
-    $('read_out').textContent = `✓ ${d.mode === 'map' ? '分块汇总' : '单次'}完成，消耗 `
-      + `${Math.round((d.usage.prompt_tokens + d.usage.completion_tokens) / 1000)}k tokens——已存 analysis.json`;
+    const d = await pollJob(st.job_id, $('read_out'));
+    if (d.error) throw new Error(d.error);
+    const r = d.result;
+    $('read_out').textContent = `✓ ${r.mode === 'map' ? '分块汇总' : '单次'}完成，消耗 `
+      + `${Math.round((r.usage.prompt_tokens + r.usage.completion_tokens) / 1000)}k tokens——已存 analysis.json`;
     $('analysisbox').style.display = '';
-    $('analysis_ta').value = JSON.stringify(d.analysis, null, 2);
+    $('analysis_ta').value = JSON.stringify(r.analysis, null, 2);
     loadPack();
   } catch (e) { $('read_out').textContent = '失败：' + e.message; }
   $('btn_read').disabled = false;
@@ -366,22 +369,34 @@ async function previewDraft() {
     else $('g_out').textContent = '';
   } catch (e) { $('g_out').textContent = '失败：' + e.message; }
 }
+async function pollJob(jobId, outEl) {  // 2s 轮询直到 done/error
+  while (true) {
+    await new Promise(r => setTimeout(r, 2000));
+    const j = await api('/app/api/distill/job/' + jobId);
+    if (outEl) outEl.textContent = j.status === 'running'
+      ? `⏳ ${j.step}` : (j.status === 'error' ? '❌ ' + j.error : '');
+    if (j.status !== 'running') return j;
+  }
+}
 async function genDraft() {
   const p = S.curPack || $('view_pack').value;
   $('btn_draft').disabled = true;
-  $('g_out').textContent = '生成中（范例→九章→三件套' + ($('g_thought').checked ? '→思想' : '') + '，逐文件低温）……';
+  $('g_out').textContent = '启动草案 job……';
   try {
-    const d = await api('/app/api/distill/gen_draft', {
+    const st = await api('/app/api/distill/gen_draft_start', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ pack: p, corpus_dir: S.curDir,
                              include_thought: $('g_thought').checked }) });
-    let html = `<p class="meta">✓ 已产出：${d.files.map(esc).join('、')}｜消耗 `
-      + `${Math.round((d.usage.prompt_tokens + d.usage.completion_tokens) / 1000)}k tokens</p>`;
-    if (d.quotes_dropped)
-      html += `<p style="color:var(--bad)">⚠ 伪造引文整条剔除 ${d.quotes_dropped} 条：`
-        + `${d.quotes_dropped_labels.map(esc).join('、')}</p>`;
-    if (d.motif_report)
-      html += `<details><summary class="meta">motif 脚本验证报告</summary><pre class="meta">${esc(d.motif_report)}</pre></details>`;
+    const d = await pollJob(st.job_id, $('g_out'));
+    if (d.error) throw new Error(d.error);
+    const r = d.result;
+    let html = `<p class="meta">✓ 已产出：${r.files.map(esc).join('、')}｜消耗 `
+      + `${Math.round((r.usage.prompt_tokens + r.usage.completion_tokens) / 1000)}k tokens</p>`;
+    if (r.quotes_dropped)
+      html += `<p style="color:var(--bad)">⚠ 伪造引文整条剔除 ${r.quotes_dropped} 条：`
+        + `${r.quotes_dropped_labels.map(esc).join('、')}</p>`;
+    if (r.motif_report)
+      html += `<details><summary class="meta">motif 脚本验证报告</summary><pre class="meta">${esc(r.motif_report)}</pre></details>`;
     $('g_result').innerHTML = html;
     $('g_out').textContent = '草案完成——去步⑤逐节校订。';
     loadPack(); setStep(4);

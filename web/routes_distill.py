@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 
@@ -415,6 +416,66 @@ def _pack_cost(pack_dir: Path, usage: dict, note: str) -> None:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+# ---- job 运行器（v0.7.3）：长任务后台线程 + 进度轮询；同步端点保留（CLI 等价）----
+
+_jobs: dict[str, dict] = {}
+
+
+_job_ctx = threading.local()
+
+
+def _cur_job() -> dict | None:
+    return getattr(_job_ctx, "v", None)
+
+
+def _run_job(kind: str, fn, payload: dict) -> str:
+    """启动后台 job（本地单用户；daemon 线程）。fn(payload, job) 内更新 job["step"]。"""
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "kind": kind, "status": "running", "step": "启动",
+           "log": [], "result": None, "error": None}
+    _jobs[jid] = job
+
+    def wrapper():
+        _job_ctx.v = job
+        try:
+            job["result"] = fn(payload, job)
+            job["status"] = "done"
+            job["step"] = "完成"
+        except HTTPException as exc:
+            job.update(status="error", error=str(exc.detail))
+        except Exception as exc:  # noqa: BLE001
+            job.update(status="error", error=f"{type(exc).__name__}: {exc}")
+
+    threading.Thread(target=wrapper, daemon=True).start()
+    return jid
+
+
+@router.get("/job/{job_id}")
+def job_status(job_id: str):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "job 不存在（或服务已重启——job 只在内存）")
+    return job
+
+
+def _read_job(payload: dict, job: dict) -> dict:
+    return read_samples(ReadIn(**payload))
+
+
+def _gen_draft_job(payload: dict, job: dict) -> dict:
+    return gen_draft(GenDraftIn(**payload))
+
+
+@router.post("/read_start")
+def read_start(body: ReadIn):
+    return {"job_id": _run_job("read", _read_job, body.model_dump())}
+
+
+@router.post("/gen_draft_start")
+def gen_draft_start(body: GenDraftIn):
+    return {"job_id": _run_job("gen_draft", _gen_draft_job, body.model_dump())}
+
+
 @router.post("/read")
 def read_samples(body: ReadIn):
     """精读选样（≤100k 字单次；超出自动 map-reduce）→ analysis.json（工作数据，
@@ -433,6 +494,8 @@ def read_samples(body: ReadIn):
     sid = f"distill-{uuid.uuid4().hex[:8]}"
     usage_total: dict = {}
     if total <= distillation.READ_SINGLE_MAX:
+        if _cur_job():
+            _cur_job()["step"] = "模型精读中（单次注入，思考型模型约 1–3 分钟）"
         result = _distill_call(cfg, sid, distillation.read_prompt(samples),
                                distillation.READ_MAX_TOKENS)
         analysis = creation.extract_json(result["text"])
@@ -441,10 +504,14 @@ def read_samples(body: ReadIn):
     else:
         chunks = distillation.chunk_files(samples)
         obs = []
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks, 1):
+            if _cur_job():
+                _cur_job()["step"] = f"分块观察 {i}/{len(chunks)}（每块 ≤800 字摘要）"
             r = _distill_call(cfg, sid, distillation.chunk_prompt(chunk),
                               distillation.OBS_MAX_TOKENS)
             obs.append(creation.extract_json(r["text"]))
+        if _cur_job():
+            _cur_job()["step"] = "主汇总融合中"
         result = _distill_call(cfg, sid, distillation.reduce_prompt(obs),
                                distillation.READ_MAX_TOKENS)
         analysis = creation.extract_json(result["text"])
@@ -552,6 +619,8 @@ def gen_draft(body: GenDraftIn):
     report: list[dict] = []
 
     def call(name: str, prompt: str, max_tokens: int) -> str:
+        if _cur_job():
+            _cur_job()["step"] = f"{name} 生成中（低温）"
         r = _distill_call(cfg, sid, prompt, max_tokens)
         spend["prompt_tokens"] += r.get("prompt_tokens", 0)
         spend["completion_tokens"] += r.get("completion_tokens", 0)
@@ -602,6 +671,8 @@ def gen_draft(body: GenDraftIn):
             call("thought.md", distillation.thought_prompt(analysis),
                  distillation.THOUGHT_MAX_TOKENS),
             encoding="utf-8", newline="\n")
+        if _cur_job():
+            _cur_job()["step"] = "motif 词表脚本验证中"
         mc = _run_script("motif_count.py", [str(cdir), "--pack", str(d), "--write"],
                          timeout=300)
         motif_report = (mc.stdout or "") + (mc.stderr or "")

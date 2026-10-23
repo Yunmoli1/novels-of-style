@@ -16,6 +16,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = ROOT / "web" / "config.local.json"
 
+
+def workbench_version() -> str:
+    """当前工作台版本 = CHANGELOG 最新条目（页脚/启动横幅显示——
+    防"旧实例跑旧代码"事故重演，用户一眼可核）。"""
+    try:
+        head = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")[:400]
+        if m := re.search(r"^## \[([\d.]+)\]", head, re.M):
+            return m.group(1)
+    except OSError:
+        pass
+    return "?"
+
 DEFAULT_CONFIG = {
     "rev": 0,                  # 乐观锁版本号：每次保存 +1（防陈旧页面静默覆盖）
     "providers": [],           # [{name, base_url, api_key, models: [id,...]}]

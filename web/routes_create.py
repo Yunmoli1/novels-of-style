@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -232,6 +233,20 @@ def projects():
             "packs": packs}
 
 
+@router.get("/next_chapter")
+def next_chapter(project: str):
+    """推荐下一章号：扫 manuscript/NNN-*.md 取最大 +1（空则 1）——
+    章节号错乱会让"上一章结尾"锚定失效，这是防呆不是强约束。"""
+    cfg = appstate.load_config()
+    ms = _project_dir(cfg, project) / "manuscript"
+    best = 0
+    if ms.is_dir():
+        for f in ms.glob("*.md"):
+            if m := re.match(r"(\d+)", f.stem):
+                best = max(best, int(m.group(1)))
+    return {"next": best + 1, "found": best}
+
+
 class AssembleIn(BaseModel):
     project: str
     pack: str
@@ -382,7 +397,7 @@ def slot_capture(body: SlotCaptureIn):
             "keywords": body.keywords,
             "target_chars": _clean_target_chars(body.target_chars),
             "chosen": None, "beats": [], "tone_note": "", "canon_anchor": "",
-            "latest_draft": None}
+            "latest_draft": None, "drafts": []}
     _write_slot(sd / f"slot-{sid}.json", slot)
     return {"slot": slot, "reused": False}
 
@@ -395,6 +410,7 @@ class SlotUpdateIn(BaseModel):
     tone_note: str | None = None
     canon_anchor: str | None = None
     latest_draft: dict | None = None
+    drafts: list[dict] | None = None  # 批次落盘（v0.7.3）：最近批次全量，刷新可恢复
     name: str | None = None
     locked: bool | None = None
 
@@ -407,7 +423,7 @@ def slot_update(body: SlotUpdateIn):
     if not s:
         raise HTTPException(404, f"槽位 {body.slot_id} 为空——先装配预览入槽")
     for k in ("chosen", "beats", "tone_note", "canon_anchor",
-              "latest_draft", "name", "locked"):
+              "latest_draft", "drafts", "name", "locked"):
         v = getattr(body, k)
         if v is not None:
             s[k] = v

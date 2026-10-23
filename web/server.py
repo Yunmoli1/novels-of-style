@@ -19,6 +19,7 @@ ROOT = WEB.parent
 sys.path.insert(0, str(WEB))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import appstate  # noqa: E402
 import routes_create  # noqa: E402
 import routes_distill  # noqa: E402
 
@@ -34,17 +35,20 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
     @app.get("/app/config")
     async def config_page(request: Request):
         return TEMPLATES.TemplateResponse(
-            request=request, name="config.html", context={"active": "config"})
+            request=request, name="config.html", context={"active": "config",
+                                                  "version": appstate.workbench_version()})
 
     @app.get("/app/create")
     async def create_page(request: Request):
         return TEMPLATES.TemplateResponse(
-            request=request, name="create.html", context={"active": "create"})
+            request=request, name="create.html", context={"active": "create",
+                                                  "version": appstate.workbench_version()})
 
     @app.get("/app/distill")
     async def distill_page(request: Request):
         return TEMPLATES.TemplateResponse(
-            request=request, name="distill.html", context={"active": "distill"})
+            request=request, name="distill.html", context={"active": "distill",
+                                                  "version": appstate.workbench_version()})
 
     if (site / "index.html").is_file():
         app.mount("/", StaticFiles(directory=str(site), html=True), name="site")

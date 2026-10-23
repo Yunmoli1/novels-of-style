@@ -29,7 +29,7 @@
 <div><!-- 左列：步骤流 -->
 
 <div class="panel">
-  <label>项目 <select id="project" onchange="S.activeSlot = null; loadPresets(); loadSlots()"></select></label>
+  <label>项目 <select id="project" onchange="switchProject()"></select></label>
   <label>风格包 <select id="pack" onchange="loadPresets()"></select></label>
   <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
   <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
@@ -168,6 +168,16 @@ async function init() {
   loadSlots();
 }
 // ---- 方案槽 ----
+async function switchProject() {
+  S.activeSlot = null;
+  $('title').value = ''; $('keywords').value = '';  // 新项目新章节：清残留
+  await loadPresets(); await loadSlots();
+  try {  // 章节号推荐：manuscript 最大 +1（防错乱致锚定失效）
+    const n = await (await fetch('/app/api/next_chapter?project='
+      + encodeURIComponent($('project').value))).json();
+    if (n.next) $('chapter_no').value = n.next;
+  } catch (e) {}
+}
 async function loadSlots() {
   try {
     const p = $('project').value;
@@ -270,8 +280,16 @@ async function loadSlot(i) {
     $('step_beats').style.display = '';
     renderBeats(s.tone_note || '不指定', s.canon_anchor || '无');
   }
-  if (s.latest_draft && s.latest_draft.text) {
+  if (Array.isArray(s.drafts) && s.drafts.length) {  // 批次恢复（v0.7.3）
+    S.drafts = s.drafts.map(d => ({ ...d }));
+    S.batchNo = Math.max(...S.drafts.map(d => d.batch || 0));
+    S.batchStart = S.drafts.length;
+    renderDrafts(); setStage(4);
+    $('gen_out').textContent = `已恢复 ${new Set(S.drafts.map(d => d.batch)).size} 批草稿`
+      + '（收尾检查需重跑；可继续生成新批）';
+  } else if (s.latest_draft && s.latest_draft.text) {
     S.drafts = [{ ...s.latest_draft, batch: 0, label: '上次稿' }];
+    S.batchStart = 1;
     renderDrafts();
   }
   const curV = S.packVersions[s.pack];
@@ -380,8 +398,10 @@ function cardHtml(dr, i) {
   const n = (dr.text || '').length;
   const emptyMark = n ? `｜正文 ${n} 字`
     : '｜<span style="color:var(--bad)">⚠ 正文为空（0 字）——勿交付</span>';
+  const diffBox = (dr.prevText && dr.prevText !== dr.text)
+    ? `<details><summary class="meta">对比修订前（红=删 绿=增）</summary>${diffHtml(dr.prevText, dr.text)}</details>` : '';
   return `<div class="panel" id="card_${i}"><strong>${dr.label || '稿'}</strong>（${dr.usage.completion_tokens || '?'} tokens）${emptyMark}${trunc}${badge}
-    <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>
+    <div class="passage streambox">${(dr.text || '').replace(/</g, '&lt;')}</div>${diffBox}
     <details><summary class="meta">fp_check / borrow_check 报告（advisory，不是门）</summary>${gate(dr.fp_check)}${gate(dr.borrow_check)}</details>
     <button class="btn" onclick="reviseDraft(${i})">按报告修订</button>
     <button class="btn ghost" onclick="endingCheck(${i})">收尾检查（判官模型）</button>
@@ -423,6 +443,18 @@ function capBatches() {
     S.drafts = S.drafts.filter(d => !d || d.batch !== oldest);
   }
 }
+function serializeBatches() {  // 批次落盘（slots）：轻量字段，刷新可恢复
+  return S.drafts.filter(d => d && d.text).map(d => ({
+    batch: d.batch, label: d.label, text: d.text,
+    revision: d.revision || 0,
+    usage: { completion_tokens: d.usage && d.usage.completion_tokens,
+             model: d.usage && d.usage.model,
+             finish_reason: d.usage && d.usage.finish_reason },
+    fp_check: d.fp_check, borrow_check: d.borrow_check }));
+}
+function persistBatches() {  // 批次与最新稿一并写回当前槽
+  slotPatch(S.activeSlot, { drafts: serializeBatches(), latest_draft: pickLatest() });
+}
 async function doGenerate() {
   if (!S.beats.length) return alert('先完成拍子表');
   capBatches();
@@ -449,7 +481,7 @@ async function doGenerate() {
       });
       $('gen_out').textContent = `完成（${d.assembly_tokens} token 上下文）`;
       renderDrafts(); setStage(4);
-      slotPatch(S.activeSlot, { latest_draft: pickLatest() });
+      persistBatches();
     }
   } catch (e) { $('gen_out').textContent = '失败：' + e.message; }
   $('btn_generate').disabled = false;
@@ -490,7 +522,7 @@ function onGenEvent(ev, d) {
     const card = $('card_' + f);
     if (card) card.outerHTML = cardHtml(S.drafts[f], f);
     refreshPick(); setStage(4);  // 只换本稿卡片——别稿可能仍在流式
-    slotPatch(S.activeSlot, { latest_draft: pickLatest() });
+    persistBatches();
   } else if (ev === 'error') {
     $('gen_out').textContent = '失败：' + d.message;
   } else if (ev === 'all_done') {
@@ -517,12 +549,13 @@ async function reviseDraft(i) {
   const card = $('card_' + i);
   if (card) card.innerHTML = `<strong>${d.label}</strong>（修订生成中<span class="meta">……</span>）
     <div class="passage streambox" id="rbox_${i}"></div>`;
+  const oldText = d.text;
   const apply = r => {
-    S.drafts[i] = { ...S.drafts[i], text: r.text, usage: r.usage,
+    S.drafts[i] = { ...S.drafts[i], prevText: oldText, text: r.text, usage: r.usage,
       fp_check: r.fp_check, borrow_check: r.borrow_check,
       revision: r.revision, ending: null };
     renderDrafts(); setStage(4);
-    slotPatch(S.activeSlot, { latest_draft: pickLatest() });
+    persistBatches();
   };
   try {
     if ($('use_stream').checked) {
@@ -553,6 +586,24 @@ async function endingCheck(i) {
       ? `<span style="color:var(--bad)">⚠ ${v.reason}——按纪律应重写收尾再交付</span>`
       : `<span style="color:var(--good)">✓ ${v.reason}</span>`;
   } catch (e) { $('end_' + i).textContent = '失败：' + e.message; }
+}
+function diffHtml(a, b) {  // 段落级 LCS：保序对齐，其余标增/删
+  const A = a.split(/\n+/).filter(x => x.trim()), B = b.split(/\n+/).filter(x => x.trim());
+  const n = A.length, m = B.length;
+  const dp = Array.from({length: n + 1}, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j] ? dp[i+1][j+1] + 1 : Math.max(dp[i+1][j], dp[i][j+1]);
+  let i = 0, j = 0, out = '';
+  const e = t => t.replace(/</g, '&lt;');
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out += `<p style="color:var(--muted)">${e(A[i])}</p>`; i++; j++; }
+    else if (dp[i+1][j] >= dp[i][j+1]) { out += `<p style="color:var(--bad);text-decoration:line-through">${e(A[i++])}</p>`; }
+    else { out += `<p style="color:var(--good)">${e(B[j++])}</p>`; }
+  }
+  while (i < n) out += `<p style="color:var(--bad);text-decoration:line-through">${e(A[i++])}</p>`;
+  while (j < m) out += `<p style="color:var(--good)">${e(B[j++])}</p>`;
+  return `<div class="passage" style="max-height:40vh;overflow:auto;font-size:13.5px">${out}</div>`;
 }
 async function doSave() {
   const i = +$('pick').value;
