@@ -944,3 +944,104 @@ def do_save(body: SaveIn):
                          note=f"第{body.chapter_no}章《{title}》")
     return {"ok": True, "manuscript": str(target), "sessions_dir": str(sessions),
             "session_totals": totals}
+
+
+# ---- 新建项目（v0.10.0：不开 agent 的用户从这里开始第一本书）----
+
+class ProjectCreateIn(BaseModel):
+    name: str
+    pack: str | None = None        # 可选：风格包钉扎（export → style/pinned-pack.md）
+    canon_pack: str | None = None  # 可选：canon 包钉扎（terms 快照 → canon/）
+
+
+BIBLE_TEMPLATES = {
+    "characters.md": "# 人物\n\n## 主角名\n一句话身份。性格：\n口头禅/说话习惯：\n与谁什么关系：\n",
+    "world.md": "# 世界设定\n\n## 基本规则\n（力量体系/经济/地理，一段一条）\n",
+    "names.json": '{"names": []}\n'
+                  '# 每个人名：{"name": "主角名", "tier": "core", "aliases": []}\n'
+                  "# tier=core 的实体块自动常驻装配（World Info）\n",
+    "../outline.md": "# 卷纲\n\n## 卷一 卷名\n\n### 1 第一章题\n概要一两句。\n\n### 2 第二章题\n概要。\n",
+}
+
+
+@router.post("/projects/create")
+def project_create(body: ProjectCreateIn):
+    cfg = appstate.load_config()
+    name = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", body.name.strip()).strip("-")
+    if not name:
+        raise HTTPException(400, "项目名非法（中英文/数字/连字符，40 字内）")
+    d = (_ws_root(cfg) / name[:40])
+    if d.exists():
+        raise HTTPException(409, f"项目已存在：{d.name}")
+    for sub in ("manuscript", "bible", "style", "sessions"):
+        (d / sub).mkdir(parents=True)
+    (d / "sessions" / ".gitignore").write_text("*\n!.gitignore\n",
+                                               encoding="utf-8", newline="\n")
+    for fname, tpl in BIBLE_TEMPLATES.items():
+        (d / "bible" / fname if not fname.startswith("../")
+         else d / fname[3:]).write_text(tpl, encoding="utf-8", newline="\n")
+    notes = ["骨架：manuscript/ bible/ style/ sessions/（gitignore）"]
+    # 可选风格包钉扎（export 单文件 + 版本注头，复用 read_pinned_pack 协议）
+    if body.pack:
+        try:
+            pack_dir = _pack_dir(body.pack)
+        except HTTPException:
+            raise HTTPException(400, f"风格包不存在：{body.pack}")
+        out = d / "style" / "pinned-pack.md"
+        r = _run_gate("export_pack.py", [str(pack_dir), "--out", str(out)])
+        if r["exit_code"] != 0:
+            raise HTTPException(502, f"钉扎导出失败：{r['report'][-300:]}")
+        ver = _pack_version(pack_dir)
+        head = f"<!-- 钉扎：{body.pack} v{ver} at {datetime.date.today()} -->\n"
+        out.write_text(head + out.read_text(encoding="utf-8"), encoding="utf-8")
+        notes.append(f"已钉扎 {body.pack} v{ver}（style/pinned-pack.md）")
+    # 可选 canon 包钉扎（terms 快照 + card）
+    if body.canon_pack:
+        notes.append(_pin_canon(d, body.canon_pack))
+    return {"ok": True, "name": d.name, "notes": notes,
+            "cli": "网页建项目 = 手工建 manuscript/bible/style 目录；"
+                   "钉扎 = python scripts/export_pack.py <包> --out <项目>/style/pinned-pack.md"}
+
+
+CANONPACKS = ROOT / "canonpacks"
+
+
+def _pin_canon(project_dir: Path, canon_pack: str) -> str:
+    """canon 包钉扎进项目（terms 快照 + card）——create 与档案页共用。"""
+    csrc = CANONPACKS / canon_pack
+    if not (csrc / "pack.json").is_file():
+        raise HTTPException(400, f"canon 包不存在：{canon_pack}")
+    cdst = project_dir / "canon"
+    cdst.mkdir(exist_ok=True)
+    terms = json.loads((csrc / "terms.json").read_text(encoding="utf-8"))
+    terms["_pinned_from"] = canon_pack
+    (cdst / "canon-terms.json").write_text(
+        json.dumps(terms, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
+    if (csrc / "card.md").is_file():
+        (cdst / "pinned-canon.md").write_text(
+            (csrc / "card.md").read_text(encoding="utf-8"),
+            encoding="utf-8", newline="\n")
+    return f"已钉扎 canon：{canon_pack}（canon/canon-terms.json）"
+
+
+@router.get("/canon_packs")
+def canon_packs():
+    out = []
+    if CANONPACKS.is_dir():
+        for d in sorted(CANONPACKS.iterdir()):
+            if d.is_dir() and (d / "pack.json").is_file():
+                out.append(d.name)
+    return {"packs": out}
+
+
+class PinCanonIn(BaseModel):
+    project: str
+    canon_pack: str
+
+
+@router.post("/pin_canon")
+def pin_canon(body: PinCanonIn):
+    cfg = appstate.load_config()
+    d = _project_dir(cfg, body.project)
+    return {"ok": True, "note": _pin_canon(d, body.canon_pack)}

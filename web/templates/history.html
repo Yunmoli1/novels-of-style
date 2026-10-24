@@ -60,6 +60,8 @@ async function loadSessions() {
         ${badge(s.fp_ok, '指纹')}${badge(s.aic_ok, 'AI腔')}${badge(s.ending === undefined ? null : !s.ending, '收尾')}
         <details ontoggle="loadDetail(this, '${esc(s.file)}', ${i})"><summary class="meta">立意 / 拍子 / 报告 / 正文预览</summary>
           <div id="det_${i}" class="meta">展开载入……</div></details>
+        <button class="btn ghost" onclick="renameCh('${esc(s.file)}', '${esc(s.title)}')">改名</button>
+        <button class="btn ghost" onclick="deleteCh('${esc(s.file)}', ${s.chapter_no})">删除</button>
       </div>`).join('');
   } catch (e) { $('chapters').innerHTML = '<p class="meta">' + e.message + '</p>'; }
 }
@@ -84,6 +86,27 @@ async function loadDetail(detailsEl, file, i) {
       <div class="passage" style="max-height:40vh;overflow:auto">${esc(d.text_preview)}</div>`;
     el.dataset.loaded = 1;
   } catch (e) { el.textContent = '载入失败：' + e.message; }
+}
+async function renameCh(file, title) {
+  const t = prompt('新的章节题（章号保留）：', title);
+  if (t === null || !t.trim()) return;
+  try {
+    const r = await api('/app/api/history/chapter_rename', { method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ project: $('project').value, file, new_title: t }) });
+    toast('已改名 → ' + r.file, 'good');
+    loadSessions();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function deleteCh(file, no) {
+  if (!confirm(`删除第 ${no} 章（${file}）？文件移入 manuscript/.trash/ 可手动恢复。`)) return;
+  try {
+    await api('/app/api/history/chapter_delete', { method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ project: $('project').value, file }) });
+    toast('已删除（.trash 可恢复）', 'good');
+    loadSessions();
+  } catch (e) { toast(e.message, 'bad'); }
 }
 async function loadCosts() {
   const p = $('project').value;

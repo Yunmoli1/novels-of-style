@@ -17,6 +17,11 @@
   @media (max-width:1180px){.create-grid{grid-template-columns:1fr}#gen_sidebar{position:static;max-height:none}}
 </style>
 <h1>创作 · 正文环</h1>
+
+<div class="panel" id="onboard" style="display:none">
+  <h3 style="margin-top:0">开始引导（四步走完即可创作）</h3>
+  <div id="ob_steps"></div>
+</div>
 <p class="meta">状态机：装配预览 → 立意确认 → 拍子表 → 生成（右侧栏，流式逐字）→ 三道门 → 确认交付。fp_check/borrow_check 是 advisory 报告不是门；收尾检查为思想层硬性条目，交付前必看。</p>
 
 <div class="panel">
@@ -30,6 +35,7 @@
 
 <div class="panel">
   <label>项目 <select id="project" onchange="switchProject()"></select></label>
+  <button class="btn ghost" onclick="newProject()">＋ 新建项目</button>
   <label>风格包 <select id="pack" onchange="loadPresets()"></select></label>
   <label>章节号 <input id="chapter_no" type="number" value="1" style="width:80px"></label>
   <label>章节题 <input id="title" style="width:200px" placeholder="如 尸潮前夜"></label>
@@ -173,6 +179,43 @@ async function init() {
   updateMeta();
   loadPresets();
   loadSlots();
+  renderOnboard(d);
+}
+async function renderOnboard(d) {
+  const cfg = await (await fetch('/app/api/config')).json();
+  const hasKey = (cfg.providers || []).some(p => p.has_key);
+  const hasRoute = (cfg.routing || {}).write;
+  const hasProject = (d.projects || []).length > 0;
+  const w = (cfg.routing || {}).write || {};
+  const box = $('ob_steps');
+  const step = (ok, label, act) => `<div style="margin:4px 0">${ok ? '✅' : '⬜'} ${label}${act || ''}</div>`;
+  const allDone = hasKey && hasRoute && hasProject;
+  if (allDone) { $('onboard').style.display = 'none'; return; }
+  $('onboard').style.display = '';
+  box.innerHTML =
+    step(hasKey, '① 配置模型 key（', !hasKey ? '<a href="/app/config">去配置</a>）' : '）✓') +
+    step(!!hasRoute, '② 给写作模块选模型（', !hasRoute ? '<a href="/app/config">去选</a>）' : '）✓') +
+    step(hasProject, '③ 建一个写作项目（', !hasProject ? '<button class="btn ghost" onclick="newProject()">新建</button>）' : '）✓') +
+    step(false, '④ 选风格包 → 装配预览 → 写第一章');
+}
+const chr10 = () => String.fromCharCode(10);
+async function newProject() {
+  const name = prompt('项目名（一本书一个项目，中英文均可）：');
+  if (!name) return;
+  let pack = '';
+  try {
+    const packs = (await (await fetch('/app/api/projects')).json()).packs;
+    pack = prompt('初始风格包（钉扎；可留空跳过）：' + chr10() + packs.map(p => p.name).join(chr10()), '') || '';
+  } catch (e) {}
+  try {
+    const r = await post('/app/api/projects/create', { name, pack: pack || null });
+    toast(`项目 ${r.name} 已建：${r.notes.join('；')}`, 'good');
+    const d = await (await fetch('/app/api/projects')).json();
+    $('project').innerHTML = d.projects.map(p => `<option value="${p.name}">${p.name}${p.pinned ? '（钉扎：' + p.pinned.pack + ' v' + p.pinned.version + '）' : ''}</option>`).join('');
+    $('project').value = r.name;
+    switchProject();
+    renderOnboard(d);
+  } catch (e) { toast(e.message, 'bad'); }
 }
 // ---- 方案槽 ----
 async function switchProject() {

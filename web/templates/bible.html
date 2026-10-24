@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}项目档案{% endblock %}
+{% block main %}
+<h1>项目档案 · 设定编辑</h1>
+<p class="meta">人物 / 世界 / names（tier=core 自动常驻装配）/ 伏笔 / 卷纲 / canon 术语——与 agent 侧完全同源（就是文件），改完立即生效于下一次装配。JSON 文件保存前会校验合法性。</p>
+
+<div class="panel genrow">
+  <label>项目 <select id="project" onchange="loadFiles()"></select></label>
+  <label>档案 <select id="file_sel" onchange="loadFile()"></select></label>
+  <button class="btn ghost" onclick="newFromTemplate()">从模板新建…</button>
+  <button class="btn ghost" onclick="pinCanon()">钉扎 canon 包…</button>
+  <button class="btn" onclick="saveFile()">保存</button>
+  <span id="out" class="meta"></span>
+</div>
+<textarea id="ta" rows="22" style="width:100%;font:13.5px/1.7 Consolas,monospace" placeholder="选择左侧档案文件编辑；没有文件就从模板新建。"></textarea>
+<p class="meta" id="hint"></p>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').replace(/</g, '&lt;');
+async function api(u, opt) {
+  const r = await fetch(u, opt);
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || r.status);
+  return d;
+}
+const post = (u, body) => api(u, { method: 'POST',
+  headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+async function init() {
+  const d = await api('/app/api/projects');
+  $('project').innerHTML = d.projects.map(p => `<option>${esc(p.name)}</option>`).join('')
+    || '<option value="">（先去创作页新建项目）</option>';
+  await loadFiles();
+}
+async function loadFiles() {
+  const p = $('project').value;
+  if (!p) return;
+  try {
+    const d = await api('/app/api/bible/files?project=' + encodeURIComponent(p));
+    $('file_sel').innerHTML = d.files.map(f => `<option>${esc(f)}</option>`).join('')
+      || '<option value="">（空——从模板新建）</option>';
+    await loadFile();
+  } catch (e) { $('out').textContent = e.message; }
+}
+async function loadFile() {
+  const f = $('file_sel').value;
+  if (!f) { $('ta').value = ''; return; }
+  try {
+    const d = await api('/app/api/bible/file?project='
+      + encodeURIComponent($('project').value) + '&path=' + encodeURIComponent(f));
+    $('ta').value = d.content;
+    $('out').textContent = '已载入 ' + f;
+    $('hint').textContent = f.endsWith('.json')
+      ? 'JSON 文件：保存前自动校验合法性。' : '';
+  } catch (e) { $('out').textContent = e.message; }
+}
+async function saveFile() {
+  const f = $('file_sel').value;
+  if (!f) return toast('先选择（或新建）档案文件', 'bad');
+  try {
+    await post('/app/api/bible/file', { project: $('project').value,
+      path: f, content: $('ta').value });
+    $('out').textContent = '✓ 已保存 ' + f + '（下次装配生效）';
+    toast('已保存 ' + f, 'good');
+  } catch (e) { $('out').textContent = e.message; toast(e.message, 'bad'); }
+}
+async function newFromTemplate() {
+  const kinds = ['characters', 'world', 'names', 'foreshadowing', 'outline', 'canon-terms'];
+  const k = prompt('新建哪种档案？\n' + kinds.map((x, i) => `${i + 1}. ${x}`).join('\n') + '\n（输入序号或名字）', '1');
+  if (!k) return;
+  const kind = kinds[+k - 1] || (kinds.includes(k) ? k : null);
+  if (!kind) return toast('无效选择', 'bad');
+  try {
+    const d = await post('/app/api/bible/template', {
+      project: $('project').value, kind });
+    toast('已新建 ' + d.path, 'good');
+    await loadFiles();
+    $('file_sel').value = d.path;
+    await loadFile();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function pinCanon() {
+  try {
+    const d = await api('/app/api/canon_packs');
+    if (!d.packs.length) return toast('仓库没有 canon 包', 'bad');
+    const c = prompt('钉扎哪个 canon 包？\n' + d.packs.join('\n'), d.packs[0]);
+    if (!c) return;
+    const r = await post('/app/api/pin_canon', {
+      project: $('project').value, canon_pack: c });
+    toast(r.note, 'good');
+    await loadFiles();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+init();
+</script>
+{% endblock %}

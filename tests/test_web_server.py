@@ -750,36 +750,43 @@ class TestWebServer(unittest.TestCase):
         """v0.9.3 小件三连：大纲块注入 + next_chapter 提示 / 局部改写
         （片段校验+保留率）/ 导出合并。"""
         import assemble as asm
-        ws = Path(self.tmp.name) / "ws" / "测试项目"
+        self.client.post("/app/api/projects/create", json={"name": "大纲书"})
+        ws = Path(self.tmp.name) / "ws" / "大纲书"
         # outline.md：卷 + 当前章概要
         (ws / "outline.md").write_text(
-            "## 卷一 落水" + chr(10) * 2 + "### 1 开局" + chr(10)
-            + "钓上鱼。" + chr(10) * 2 + "### 2 夜谈" + chr(10)
+            "## 卷一 落水" + chr(10) * 2 + "### 2 夜谈" + chr(10)
             + "雨夜对峙。" + chr(10) * 2 + "### 3 追踪" + chr(10) + "进城。" + chr(10),
             encoding="utf-8")
         import assemble as _asm
         from pathlib import Path as _P
         # 大纲块：chapter_no=2 → 本章=夜谈、前后章可见
         a = self.client.post("/app/api/assemble", json={
-            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "project": "大纲书", "pack": "luxun", "chapter_no": 2,
             "keywords": []}).json()
         ol = [i for i in a["items"] if i["kind"] == "大纲·卷内位置"]
         self.assertTrue(ol, "outline 存在且含本章时应注入大纲块")
         self.assertIn("夜谈", ol[0]["excerpt"])
         self.assertIn("追踪", ol[0]["excerpt"])
-        # next_chapter 提示
+        # next_chapter 提示（自足：outline 写到第 6 章，manuscript 自造 005）
+        msd = ws / "manuscript"
+        (msd / "001-开局.md").write_text("x", encoding="utf-8")
+        (msd / "005-未来章.md").write_text("x", encoding="utf-8")
+        (ws / "outline.md").write_text(
+            "## 卷一 落水" + chr(10) * 2 + "### 6 追踪" + chr(10) + "进城。" + chr(10),
+            encoding="utf-8")
         n = self.client.get("/app/api/next_chapter",
-                            params={"project": "测试项目"}).json()
+                            params={"project": "大纲书"}).json()
+        self.assertEqual(n["next"], 6)
         self.assertIn("outline.md 已有", n["outline_hint"])
         # 局部改写：片段不在正文 → 400
         bad = self.client.post("/app/api/rewrite", json={
-            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "project": "大纲书", "pack": "luxun", "chapter_no": 2,
             "title": "夜谈", "text": PROSE, "fragment": "不存在的片段",
             "instruction": "x"})
         self.assertEqual(bad.status_code, 400)
         # 合法片段：mock 返回 PROSE_REVISED；kept_ratio 返回
         ok = self.client.post("/app/api/rewrite", json={
-            "project": "测试项目", "pack": "luxun", "chapter_no": 2,
+            "project": "大纲书", "pack": "luxun", "chapter_no": 2,
             "title": "夜谈", "text": PROSE, "fragment": "他推门出去",
             "instruction": "更冷一点"})
         self.assertEqual(ok.status_code, 200)
@@ -788,13 +795,16 @@ class TestWebServer(unittest.TestCase):
         self.assertIsInstance(d["kept_ratio"], float)
         self.assertIn("ai_cliche", d)
         # 导出：区间 1–2（001-开局 002-夜谈 004-x 已存在）
+        (ws / "manuscript" / "001-开局.md").write_text(
+            "枪说自己叫大比目鱼。", encoding="utf-8")
+        (ws / "manuscript" / "002-夜谈.md").write_text("细雨。", encoding="utf-8")
         ex = self.client.post("/app/api/export", json={
-            "project": "测试项目", "chapter_from": 1, "chapter_to": 2})
+            "project": "大纲书", "chapter_from": 1, "chapter_to": 2})
         self.assertEqual(ex.status_code, 200)
         self.assertIn("枪说自己叫大比目鱼", ex.text)  # 001 内容在
         self.assertIn("attachment", ex.headers["content-disposition"])
         miss = self.client.post("/app/api/export", json={
-            "project": "测试项目", "chapter_from": 90, "chapter_to": 99})
+            "project": "大纲书", "chapter_from": 90, "chapter_to": 99})
         self.assertEqual(miss.status_code, 404)
 
     def test_ai_cliche_check_script(self):
@@ -893,6 +903,108 @@ class TestWebServer(unittest.TestCase):
         page = self.client.get("/app/history")
         self.assertEqual(page.status_code, 200)
         self.assertIn("每章消耗", page.text)
+
+    def test_project_create_skeleton_and_pin(self):
+        """v0.10.0 新建项目：骨架模板 + 风格包钉扎（版本注头协议）+ 重名 409。"""
+        r = self.client.post("/app/api/projects/create", json={
+            "name": "新书试验", "pack": "luxun"})
+        self.assertEqual(r.status_code, 200)
+        d = r.json()
+        self.assertEqual(d["name"], "新书试验")
+        ws = Path(self.tmp.name) / "ws" / "新书试验"
+        for sub in ("manuscript", "bible", "style", "sessions"):
+            self.assertTrue((ws / sub).is_dir(), sub)
+        self.assertTrue((ws / "bible" / "characters.md").is_file())
+        self.assertTrue((ws / "bible" / "names.json").is_file())
+        self.assertTrue((ws / "outline.md").is_file())
+        self.assertIn("已钉扎 luxun", "；".join(d["notes"]))
+        pinned = (ws / "style" / "pinned-pack.md").read_text(encoding="utf-8")
+        self.assertIn("钉扎：luxun v", pinned[:200])
+        # discover 能看到 + pinned 解析
+        pr = self.client.get("/app/api/projects").json()
+        entry = next(x for x in pr["projects"] if x["name"] == "新书试验")
+        self.assertEqual(entry["pinned"]["pack"], "luxun")
+        # 重名 409；非法名 400
+        self.assertEqual(self.client.post("/app/api/projects/create",
+            json={"name": "新书试验"}).status_code, 409)
+        self.assertEqual(self.client.post("/app/api/projects/create",
+            json={"name": "  "}).status_code, 400)
+
+    def test_bible_editor_roundtrip_and_guard(self):
+        """v0.10.0 档案编辑器：模板新建 → 读写往返 → JSON 校验拒绝 →
+        白名单/穿越拒绝 → canon 钉扎与术语表可编辑。"""
+        self.client.post("/app/api/projects/create", json={"name": "档案书"})
+        t = self.client.post("/app/api/bible/template",
+                             json={"project": "档案书", "kind": "foreshadowing"})
+        self.assertEqual(t.status_code, 200)
+        self.assertEqual(t.json()["path"], "bible/foreshadowing.md")
+        dup = self.client.post("/app/api/bible/template",
+                               json={"project": "档案书", "kind": "foreshadowing"})
+        self.assertEqual(dup.status_code, 409)
+        # 写合法 JSON
+        w = self.client.post("/app/api/bible/file", json={
+            "project": "档案书", "path": "bible/names.json",
+            "content": '{"names": [{"name": "阿一", "tier": "core"}]}'})
+        self.assertEqual(w.status_code, 200)
+        g = self.client.get("/app/api/bible/file", params={
+            "project": "档案书", "path": "bible/names.json"}).json()
+        self.assertIn("阿一", g["content"])
+        # 非法 JSON 拒绝且不落盘
+        bad = self.client.post("/app/api/bible/file", json={
+            "project": "档案书", "path": "bible/names.json",
+            "content": "{not json"})
+        self.assertEqual(bad.status_code, 400)
+        g2 = self.client.get("/app/api/bible/file", params={
+            "project": "档案书", "path": "bible/names.json"}).json()
+        self.assertIn("阿一", g2["content"])
+        # 白名单外与穿越拒绝
+        self.assertEqual(self.client.post("/app/api/bible/file", json={
+            "project": "档案书", "path": "manuscript/001-x.md",
+            "content": "x"}).status_code, 400)
+        self.assertEqual(self.client.post("/app/api/bible/file", json={
+            "project": "档案书", "path": "../../web/config.local.json",
+            "content": "x"}).status_code, 400)
+        # canon 钉扎 → 术语表出现在档案清单且可编辑
+        cp = self.client.get("/app/api/canon_packs").json()["packs"]
+        self.assertIn("zhuifang", cp)
+        pin = self.client.post("/app/api/pin_canon", json={
+            "project": "档案书", "canon_pack": "zhuifang"})
+        self.assertEqual(pin.status_code, 200)
+        files = self.client.get("/app/api/bible/files",
+                                params={"project": "档案书"}).json()["files"]
+        self.assertIn("canon/canon-terms.json", files)
+
+    def test_chapter_rename_delete(self):
+        """v0.10.0 章节管理：改名保留章号（非法字符消毒/目标冲突 409），
+        删除进 .trash 可恢复。"""
+        self.client.post("/app/api/projects/create", json={"name": "章节管理书"})
+        ms = Path(self.tmp.name) / "ws" / "章节管理书" / "manuscript"
+        (ms / "002-夜谈.md").write_text("占位（冲突目标）", encoding="utf-8")
+        (ms / "009-旧题.md").write_text("正文", encoding="utf-8")
+        r = self.client.post("/app/api/history/chapter_rename", json={
+            "project": "章节管理书", "file": "009-旧题.md", "new_title": '新/题:x'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["file"], "009-新_题_x.md")
+        self.assertTrue((ms / "009-新_题_x.md").is_file())
+        again = self.client.post("/app/api/history/chapter_rename", json={
+            "project": "章节管理书", "file": "009-新_题_x.md",
+            "new_title": "新_题_x"})
+        self.assertEqual(again.status_code, 200)  # 同名幂等
+        (ms / "009-占位b.md").write_text("y", encoding="utf-8") if False else None
+        ms2 = ms  # 同章号目标冲突：把 009 改成已存在的"占位b"
+        (ms2 / "009-占位b.md").write_text("y", encoding="utf-8")
+        conf = self.client.post("/app/api/history/chapter_rename", json={
+            "project": "章节管理书", "file": "009-新_题_x.md", "new_title": "占位b"})
+        self.assertEqual(conf.status_code, 409)  # 目标 009-占位b.md 已存在
+        d = self.client.post("/app/api/history/chapter_delete", json={
+            "project": "章节管理书", "file": "009-新_题_x.md"})
+        self.assertEqual(d.status_code, 200)
+        self.assertFalse((ms / "009-新_题_x.md").exists())
+        self.assertTrue(list((ms / ".trash").glob("*009-新_题_x.md")),
+                        "删除应进 .trash 可恢复")
+        miss = self.client.post("/app/api/history/chapter_delete", json={
+            "project": "章节管理书", "file": "../../pack.json"})
+        self.assertEqual(miss.status_code, 404)
 
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)

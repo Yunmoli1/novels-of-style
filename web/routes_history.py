@@ -8,9 +8,12 @@ sessions/ 是每章交付的完整可复判快照——此前只能翻 JSON 文�
 from __future__ import annotations
 
 import json
+import re
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 import appstate
 import routes_create as _rc
@@ -86,3 +89,47 @@ def costs(project: str):
     return {"rows": rows,
             "total_tokens": sum(int(r.get("session_tokens")
                                      or r.get("tokens") or 0) for r in rows)}
+
+
+class ChapterOpIn(BaseModel):
+    project: str
+    file: str
+    new_title: str = ""
+
+
+@router.post("/chapter_rename")
+def chapter_rename(body: ChapterOpIn):
+    """章节改名（manuscript/NNN-题.md 重命名，章号保留）。"""
+    cfg = appstate.load_config()
+    ms = _project(cfg, body.project) / "manuscript"
+    p = (ms / body.file).resolve()
+    if not p.is_file() or p.parent != ms.resolve():
+        raise HTTPException(404, "章节文件不存在")
+    m = re.match(r"(\d+)", p.stem)
+    if not m:
+        raise HTTPException(400, "文件名无章号前缀")
+    title = (body.new_title or "").strip()
+    for ch in '\/:*?"<>|':
+        title = title.replace(ch, "_")
+    title = title.strip(". ") or "未命名"
+    target = ms / f"{int(m.group(1)):03d}-{title}.md"
+    if target == p:
+        return {"ok": True, "file": target.name}
+    if target.exists():
+        raise HTTPException(409, f"目标文件已存在：{target.name}")
+    p.rename(target)
+    return {"ok": True, "file": target.name}
+
+
+@router.post("/chapter_delete")
+def chapter_delete(body: ChapterOpIn):
+    """删除章节（confirm 在前端；文件移入 manuscript/.trash/ 可恢复）。"""
+    cfg = appstate.load_config()
+    ms = _project(cfg, body.project) / "manuscript"
+    p = (ms / body.file).resolve()
+    if not p.is_file() or p.parent != ms.resolve():
+        raise HTTPException(404, "章节文件不存在")
+    trash = ms / ".trash"
+    trash.mkdir(exist_ok=True)
+    p.rename(trash / (time.strftime("%Y%m%d-%H%M%S-") + p.name))
+    return {"ok": True}

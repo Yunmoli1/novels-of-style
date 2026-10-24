@@ -13,6 +13,7 @@
 <div class="navsec">工作台</div>
 <a href="/app/create" {% if active == 'create' %}class="active"{% endif %}>创作</a>
 <a href="/app/distill" {% if active == 'distill' %}class="active"{% endif %}>蒸馏</a>
+<a href="/app/bible" {% if active == 'bible' %}class="active"{% endif %}>项目档案</a>
 <a href="/app/history" {% if active == 'history' %}class="active"{% endif %}>历史与成本</a>
 <a href="/app/config" {% if active == 'config' %}class="active"{% endif %}>模型配置</a>
 </nav><main>{% block main %}{% endblock %}

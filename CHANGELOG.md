@@ -2,6 +2,27 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.10.0] - 2026-10-24
+
+### Added（完整工作台最后一程：不开 agent 的用户全程网页走通）
+- **新建项目**（POST /projects/create）：一键生成写作骨架（manuscript/bible/
+  style/sessions + characters/world/names/outline 模板）+ 可选风格包钉扎
+  （export 单文件 + 版本注头，read_pinned_pack 协议）+ 可选 canon 包钉扎
+  （terms 快照）；创作页「＋ 新建项目」弹层（选包列表可跳过）
+- **开始引导面板**（创作页顶部条件渲染）：四步 checklist——配 key → 选
+  写作模型 → 建项目 → 写第一章；已完成步打钩，全部完成自动隐藏（老用户
+  无感）；未完成步带直达链接/按钮
+- **项目档案编辑器**（/app/bible，导航新增）：bible/（人物/世界/names/
+  伏笔）+ canon/（术语表）+ outline.md 的网页编辑——与 agent 侧完全同源
+  （就是文件，改完下次装配生效）；JSON 保存前合法性校验；六种模板一键
+  新建（已存在 409 防覆盖）；白名单 + 穿越防护；canon 包钉扎按钮
+- **章节管理**（历史页）：改名（保留章号、非法字符消毒、同章号目标冲突
+  409）/ 删除（进 manuscript/.trash/ 可恢复，confirm 双确认）
+
+### Fixed
+- 测试顺序依赖三连（新测试全部独立项目自足——共享"测试项目"互相污染的
+  老坑又踩，本次彻底隔离）
+
 ## [0.9.5] - 2026-10-24
 
 ### Added

@@ -23,6 +23,7 @@ import appstate  # noqa: E402
 import routes_create  # noqa: E402
 import routes_distill  # noqa: E402
 import routes_memory  # noqa: E402
+import routes_bible  # noqa: E402
 import routes_history  # noqa: E402
 
 TEMPLATES = Jinja2Templates(directory=str(WEB / "templates"))
@@ -34,6 +35,7 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
     app.include_router(routes_create.router)
     app.include_router(routes_distill.router)
     app.include_router(routes_memory.router)
+    app.include_router(routes_bible.router)
     app.include_router(routes_history.router)
 
     @app.get("/app/history")
@@ -41,6 +43,13 @@ def create_app(site_dir: Path | None = None) -> FastAPI:
         return TEMPLATES.TemplateResponse(
             request=request, name="history.html",
             context={"active": "history",
+                     "version": appstate.workbench_version()})
+
+    @app.get("/app/bible")
+    async def bible_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request=request, name="bible.html",
+            context={"active": "bible",
                      "version": appstate.workbench_version()})
 
     @app.get("/app/config")
