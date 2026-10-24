@@ -2,15 +2,33 @@
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{% block title %}工作台{% endblock %} · StylePack</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2314161a%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2718%27 text-anchor=%27middle%27%3E%E2%9C%92%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css"></head>
-<body><div class="wrap"><nav><div class="brand">StylePack</div>
+<body><div class="wrap"><nav><div class="brand"><span class="dot"></span>StylePack</div>
+<div class="navsec">浏览</div>
 <a href="/index.html">门户</a>
-<a href="/judging/">盲测判读台</a>
 <a href="/packs/">包浏览</a>
 <a href="/canon/">canon 包</a>
-<a href="/app/config" {% if active == 'config' %}class="active"{% endif %}>模型配置</a>
+<a href="/judging/">盲测判读台</a>
+<div class="navsec">工作台</div>
 <a href="/app/create" {% if active == 'create' %}class="active"{% endif %}>创作</a>
 <a href="/app/distill" {% if active == 'distill' %}class="active"{% endif %}>蒸馏</a>
+<a href="/app/config" {% if active == 'config' %}class="active"{% endif %}>模型配置</a>
 </nav><main>{% block main %}{% endblock %}
-<footer>本地工作台 v{{ version or '?' }} · 仅监听 127.0.0.1 · key 只存服务端 · sessions 不入库</footer>
-</main></div></body></html>
+<footer><span>本地工作台 v{{ version or '?' }}</span><span class="sep">|</span>
+<span>仅监听 127.0.0.1</span><span class="sep">|</span>
+<span>key 只存服务端</span><span class="sep">|</span>
+<span>sessions 不入库</span></footer>
+</main></div>
+<div id="toast"></div>
+<script>
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.className = 't' + (type ? ' ' + type : '');
+  t.textContent = msg;
+  document.getElementById('toast').appendChild(t);
+  setTimeout(() => { t.style.transition = 'opacity .3s'; t.style.opacity = '0';
+                     setTimeout(() => t.remove(), 320); }, type === 'bad' ? 6000 : 3500);
+}
+window.toast = showToast;
+</script></body></html>

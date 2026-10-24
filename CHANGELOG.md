@@ -2,6 +2,25 @@
 
 所有显著变更记录于此。格式参照 Keep a Changelog，版本遵循 SemVer。
 
+## [0.9.4] - 2026-10-24
+
+### Changed（UI/UX 打磨——联网参考 2026 工具类应用做法后落地）
+- **全局视觉升级**（build_site CSS，静态页与 app 页共享一份）：
+  设计令牌化（--accent-soft/--radius/--speed）；输入/选择器统一 focus 焦点环
+  （可访问性基线）；按钮 hover/active/disabled 三态过渡；暗色滚动条；
+  表格行 hover；::selection 高亮
+- **导航分组**：「浏览」（门户/包浏览/canon/判读台）与「工作台」（创作/蒸馏/
+  模型配置）两节 + 品牌圆点；active 态改浅蓝底高亮；210px 侧栏
+- **表单对齐**：`.panel label` 改纵向布局（标签在上、控件在下）——创作/
+  蒸馏/配置页的表单从行内参差变整齐网格；`.verdict label` 行内保护
+  （判读台 8×4 单选不受影响，浏览器实测）
+- **toast 轻提示**：全局 showToast（右下角，good/bad 分色，自动消失）——
+  创作/蒸馏页 15 处高频 alert 替换（错误不打断、成功有反馈）；
+  confirm 类（交付/修订/盲测确认）保留原生
+- favicon（SVG data-uri，✒）；footer 分段布局（版本 | 安全提示）
+- 静态站点 layout 同步（nav 分组/版本 footer/favicon），重建后判读台
+  8 轮×32 单选实测完好；浏览器截图验证创作页/判读台
+
 ## [0.9.3] - 2026-10-24
 
 ### Added（阶段 D 小件三连）

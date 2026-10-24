@@ -218,7 +218,7 @@ async function captureSlot() {
       target_chars: targetChars(), title: $('title').value });
     S.activeSlot = d.slot.id;
     await loadSlots();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message, 'bad'); }
 }
 async function slotPatch(i, fields) {
   if (!i) return;
@@ -246,7 +246,7 @@ async function clearSlot(i) {
     await post('/app/api/slots/clear', { project: $('project').value, slot_id: i });
     if (S.activeSlot === i) S.activeSlot = null;
     await loadSlots();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message, 'bad'); }
 }
 async function loadSlot(i) {
   const s = S.slots[i - 1];
@@ -360,7 +360,7 @@ function pickOption(i) {
 }
 function lockChosen() {
   try { S.chosen = JSON.parse($('chosen_json').value); }
-  catch (e) { return alert('已选方向不是合法 JSON'); }
+  catch (e) { return toast('已选方向不是合法 JSON', 'bad'); }
   $('step_beats').style.display = '';
   $('beats').innerHTML = '<p class="meta">点「生成拍子表」。</p><button class="btn" onclick="doBeats()">生成拍子表</button>';
   slotPatch(S.activeSlot, { chosen: S.chosen });
@@ -394,7 +394,7 @@ async function reroll(no) {
       chosen: S.chosen, beats: S.beats, index: no,
       target_chars: targetChars(), session_id: S.session_id });
     S.beats[no - 1] = d.beat; renderBeats($('tone_note').value, $('canon_anchor').value);
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message, 'bad'); }
 }
 // ---- 生成现场（草稿按批累积，保留最近 5 批）----
 function cardHtml(dr, i) {
@@ -464,7 +464,7 @@ function persistBatches() {  // 批次与最新稿一并写回当前槽
   slotPatch(S.activeSlot, { drafts: serializeBatches(), latest_draft: pickLatest() });
 }
 async function doGenerate() {
-  if (!S.beats.length) return alert('先完成拍子表');
+  if (!S.beats.length) return toast('先完成拍子表', 'bad');
   capBatches();
   renderDrafts();  // 被挤掉的最旧批卡片同步消失
   S.batchNo += 1;
@@ -549,7 +549,7 @@ function onGenEvent(ev, d) {
 }
 async function reviseDraft(i) {
   const d = S.drafts[i];
-  if (!(d.text || '').trim()) return alert('空稿无需修订——请重新生成正文（若反复为空，多半是思考型模型耗尽了 max_tokens，见报错提示）');
+  if (!(d.text || '').trim()) return toast('空稿无需修订——若反复为空多半是思考模型耗尽 max_tokens', 'bad');
   if (!confirm(`按报告修订会重写【${d.label}】的语言层（结构/立意/收尾保留），继续？`)) return;
   const body = {...S.req, title: $('title').value, chosen: S.chosen || {},
     beats: S.beats, text: d.text,
@@ -582,7 +582,7 @@ async function reviseDraft(i) {
       S.session_id = r.session_id;
       apply(r);
     }
-  } catch (e) { alert('修订失败：' + e.message); renderDrafts(); }
+  } catch (e) { toast('修订失败：' + e.message, 'bad'); renderDrafts(); }
 }
 async function endingCheck(i) {
   $('end_' + i).textContent = '判官检查中……';
@@ -617,8 +617,8 @@ function diffHtml(a, b) {  // 段落级 LCS：保序对齐，其余标增/删
 async function doSave() {
   const i = +$('pick').value;
   const d = S.drafts[i];
-  if (!d) return alert('还没有可交付的稿');
-  if (!(d.text || '').trim()) return alert('草稿为空，拒绝交付——请重新生成');
+  if (!d) return toast('还没有可交付的稿', 'bad');
+  if (!(d.text || '').trim()) return toast('草稿为空，拒绝交付——请重新生成', 'bad');
   if (!$('title').value.trim() && !confirm('章节题为空，将保存为「未命名」，继续？')) return;
   if (!d.ending && !confirm('【收尾检查】此稿还没跑、或修订后没重跑（思想层硬性条目）。仍要交付？')) return;
   const r = await post('/app/api/save', {...S.req, title: $('title').value,
@@ -661,7 +661,7 @@ async function rewriteFragment(i) {
     else
       $('gen_out').textContent = `局部改写完成（其余保留率 ${r.kept_ratio}）`;
     persistBatches();
-  } catch (e) { alert('改写失败：' + e.message); renderDrafts(); }
+  } catch (e) { toast('改写失败：' + e.message, 'bad'); renderDrafts(); }
 }
 async function doExport() {
   const a = prompt('导出起始章号：', $('chapter_no').value || '1');
@@ -730,7 +730,7 @@ async function memMerge(id, force) {
     if (r.blocked && r.blocked.length)
       alert('该条为中/高风险，须点"确认高风险合并"');
     loadPending();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message, 'bad'); }
 }
 init();
 </script>

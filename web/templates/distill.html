@@ -212,8 +212,8 @@ async function showSamples() {
 function togExcl(f, on) { on ? S.exclude.add(f) : S.exclude.delete(f); }
 async function doIngest() {
   const f = $('c_file').files[0];
-  if (!f) return alert('先选 txt 文件');
-  if (!$('c_author').value.trim()) return alert('先填作者目录名');
+  if (!f) return toast('先选 txt 文件', 'bad');
+  if (!$('c_author').value.trim()) return toast('先填作者目录名', 'bad');
   $('ing_out').textContent = '入库中……';
   const q = new URLSearchParams({ author: $('c_author').value.trim(),
     work: $('c_work').value.trim(), source_url: $('c_url').value.trim(),
@@ -229,7 +229,7 @@ async function doIngest() {
 }
 async function createPack() {
   const name = $('p_name').value.trim();
-  if (!name) return alert('先填包名');
+  if (!name) return toast('先填包名', 'bad');
   try {
     const d = await api('/app/api/distill/pack', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -242,8 +242,8 @@ async function createPack() {
 }
 async function doFingerprint() {
   if (!S.curPack) { S.curPack = $('p_name').value.trim(); }
-  if (!S.curPack) return alert('先建草稿包（或填包名）');
-  if (!S.curDir) return alert('先选语料集');
+  if (!S.curPack) return toast('先建草稿包（或填包名）', 'bad');
+  if (!S.curDir) return toast('先选语料集', 'bad');
   $('fp_out').textContent = '计算中（fp_extract + build_delta --layered）……';
   try {
     const d = await api('/app/api/distill/fingerprint', {
@@ -329,7 +329,7 @@ function updatePreview(mode, chunks, calls, tokens) {
 }
 async function doRead() {
   const used = usedSel();
-  if (!used.length) return alert('选样为空');
+  if (!used.length) return toast('选样为空', 'bad');
   if (!confirm(`开始精读？${used.length} 篇 / `
     + `${used.reduce((a, r) => a + (r.chars || 0), 0)} 字——将调用写作路由模型（见上方预告）`)) return;
   $('btn_read').disabled = true;
@@ -505,7 +505,7 @@ async function blindJudge(choice) {
     body: JSON.stringify({ pack: p, round_no: no, choice }) });
   if (d.finished) {
     const rs = d.results;
-    alert(`全部判完！带包被认出 ${rs.hits}/${rs.total}（胜率 ${rs.win_rate}）`);
+    toast(`盲测完成：带包被认出 ${rs.hits}/${rs.total}（胜率 ${rs.win_rate}）`, 'good');
   }
   blindShow();
 }

@@ -28,36 +28,57 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import splib  # noqa: E402
 
-CSS = """:root{--bg:#14161a;--panel:#1d2127;--panel2:#232830;--text:#d8dce2;--muted:#8a919c;--accent:#6ea8fe;--border:#2a2f37;--good:#7bc47f;--bad:#e08585}
+CSS = """:root{--bg:#14161a;--panel:#1d2127;--panel2:#232830;--text:#d8dce2;--muted:#8a919c;--accent:#6ea8fe;--accent-soft:rgba(110,168,254,.14);--border:#2a2f37;--good:#7bc47f;--bad:#e08585;--radius:10px;--speed:.15s}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.75 "Segoe UI","Microsoft YaHei",sans-serif}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+::selection{background:var(--accent-soft)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--panel2);border-radius:5px}::-webkit-scrollbar-thumb:hover{background:var(--border)}::-webkit-scrollbar-track{background:transparent}
 .wrap{display:flex;min-height:100vh}
-nav{width:190px;flex:0 0 190px;background:var(--panel);border-right:1px solid var(--border);padding:18px 14px;position:sticky;top:0;height:100vh;overflow:auto}
-nav .brand{font-weight:700;margin-bottom:14px;letter-spacing:.5px}
-nav a{display:block;padding:6px 8px;border-radius:6px;color:var(--text);font-size:14px}
-nav a.active,nav a:hover{background:var(--panel2);text-decoration:none}
+nav{width:210px;flex:0 0 210px;background:var(--panel);border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:0;height:100vh;overflow:auto}
+nav .brand{font-weight:700;margin:2px 6px 14px;letter-spacing:.5px;font-size:16px}
+nav .brand .dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--accent);margin-right:7px;vertical-align:1px}
+nav .navsec{margin:14px 8px 4px;font-size:11.5px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase}
+nav a{display:block;padding:6px 10px;border-radius:7px;color:var(--text);font-size:14px;transition:background var(--speed),color var(--speed)}
+nav a:hover{background:var(--panel2);text-decoration:none}
+nav a.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
 nav .sub{padding-left:16px;font-size:13px;color:var(--muted)}
 main{flex:1;padding:26px 34px;max-width:980px}
 h1{font-size:22px;margin:.2em 0 .6em}h2{font-size:18px;margin:1.4em 0 .5em;border-bottom:1px solid var(--border);padding-bottom:4px}h3{font-size:15.5px;margin:1.2em 0 .4em;color:var(--accent)}
 p{margin:.5em 0}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin:10px 0}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;margin:10px 0}
 .meta{color:var(--muted);font-size:13px}
 table{border-collapse:collapse;margin:8px 0;width:100%}
 th,td{border:1px solid var(--border);padding:4px 10px;text-align:left;font-size:13.5px}
 th{background:var(--panel2)}
-.passage{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 20px;margin:10px 0;font:15.5px/2.0 "Noto Serif SC","Source Han Serif SC","SimSun",serif;white-space:pre-wrap}
+tr:hover td{background:rgba(110,168,254,.04)}
+.passage{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin:10px 0;font:15.5px/2.0 "Noto Serif SC","Source Han Serif SC","SimSun",serif;white-space:pre-wrap}
 blockquote{margin:.5em 0;padding:6px 14px;border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 8px 8px 0}
 code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:13px}
-.btn{display:inline-block;background:var(--accent);color:#10131a;border:0;border-radius:8px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;margin:6px 8px 6px 0}
-.btn.ghost{background:var(--panel2);color:var(--text)}
+.btn{display:inline-block;background:var(--accent);color:#10131a;border:0;border-radius:8px;padding:8px 18px;font-size:14px;font-weight:600;cursor:pointer;margin:6px 8px 6px 0;transition:filter var(--speed),transform var(--speed),background var(--speed)}
+.btn:hover{filter:brightness(1.12)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none;transform:none}
+.btn.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--border)}
+.btn.ghost:hover{border-color:var(--accent);filter:none}
+.btn:focus-visible,nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,textarea,select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:6px 10px;font:inherit;transition:border-color var(--speed)}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.panel label{display:inline-flex;flex-direction:column;align-items:flex-start;gap:3px;margin:6px 12px 6px 0;font-size:12.5px;color:var(--muted)}
+.verdict label,.panel label.inline{display:inline-flex;flex-direction:row;align-items:center;gap:6px;font-size:inherit;color:inherit;margin:0 14px 0 0}
+.genrow{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end}
+#toast{position:fixed;right:18px;bottom:18px;z-index:99;display:flex;flex-direction:column;gap:8px}
+#toast .t{background:var(--panel2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;padding:10px 16px;font-size:14px;box-shadow:0 6px 24px rgba(0,0,0,.35);animation:tin .2s ease-out}
+#toast .t.good{border-left-color:var(--good)}#toast .t.bad{border-left-color:var(--bad)}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .round{margin:26px 0}
 .round .head{font-weight:700;margin-bottom:4px}
 .verdict{margin-top:8px;padding:10px 14px;background:var(--panel2);border-radius:8px}
 .verdict label{margin-right:14px}
-textarea{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font:inherit}
+textarea{width:100%}
 select,button{font:inherit}
 progress{width:180px;vertical-align:middle}
-footer{color:var(--muted);font-size:12px;margin-top:30px;border-top:1px solid var(--border);padding-top:10px}
+footer{color:var(--muted);font-size:12px;margin-top:30px;border-top:1px solid var(--border);padding-top:10px;display:flex;flex-wrap:wrap;gap:4px 18px}
+footer .sep{color:var(--border)}
 """
 
 
@@ -143,23 +164,41 @@ def layout(title: str, body: str, active: str, rel: str = "../") -> str:
     def navlink(href, label, key, cls=""):
         c = f' class="{cls} active"' if key == active else (f' class="{cls}"' if cls else "")
         return f'<a href="{href}"{c}>{label}</a>'
+    import appstate as _appstate
+    try:
+        ver = _appstate.workbench_version()
+    except Exception:  # noqa: BLE001
+        ver = "?"
     nav = [
+        '<div class="brand"><span class="dot"></span>StylePack</div>',
+        '<div class="navsec">浏览</div>',
         navlink(f"{rel}index.html", "门户", "home"),
-        navlink(f"{rel}judging/", "盲测判读台", "judging"),
         navlink(f"{rel}packs/", "包浏览", "packs"),
         navlink(f"{rel}canon/", "canon 包", "canon"),
+        navlink(f"{rel}judging/", "盲测判读台", "judging"),
+        '<div class="navsec">工作台</div>',
         '<a href="/app/config">模型配置</a>',
         '<a href="/app/create">创作</a>',
+        '<a href="/app/distill">蒸馏</a>',
     ]
+    footer = (f'<footer><span>本地工作台 v{ver}</span><span class="sep">|</span>'
+              '<span>全部数据与渲染均在本机</span><span class="sep">|</span>'
+              '<span>引文 ≤200 字，全文不出库</span></footer>')
+    favicon = ('<link rel="icon" href="data:image/svg+xml,'
+               '%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E'
+               '%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%2314161a%27/%3E'
+               '%3Ctext x=%2716%27 y=%2723%27 font-size=%2718%27 text-anchor=%27middle%27%3E'
+               '%E2%9C%92%3C/text%3E%3C/svg%3E">')
     return f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{esc(title)} · StylePack 工作台</title>
+{favicon}
 <link rel="stylesheet" href="{rel}style.css"></head>
-<body><div class="wrap"><nav><div class="brand">StylePack</div>
+<body><div class="wrap"><nav>
 {chr(10).join(nav)}
 </nav><main>{body}
-<footer>本地工作台 · 阶段 0（v0.5.2）· 全部数据与渲染均在本机 · 引文 ≤200 字，全文不出库</footer>
+{footer}
 </main></div></body></html>"""
 
 
