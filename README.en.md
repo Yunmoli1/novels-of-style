@@ -28,6 +28,38 @@ ingest corpus → fingerprint checkup → close reading → human review → pub
    → memory registration → feedback loop
 ```
 
+## Three seconds: packed vs. unpacked
+
+Same model, same prompt — "write a winter market scene". Left is the model's
+default style; right is the same model with a Lu Xun style pack pasted in
+(real archived blind-test arms, excerpted; the style markers — final 罢,
+大约/未必 hedging, circular repetition — live in the Chinese original):
+
+> **Default style**: The winter market opens before dawn. A biting wind pours
+> in from the street corner; vendors shrink their necks, hands tucked into
+> sleeves... The deal finally closes, money changes hands, and everyone falls
+> silent, melting back into the crowd.
+
+> **With the Lu Xun pack**: The stalls line the street: vegetables, and beyond
+> the vegetables, more vegetables... An old woman guards half a basket of eggs.
+> Someone picks one up, holds it against the sky: "How much?" She raises three
+> fingers and says nothing — as if speaking would crack the egg... The market
+> will likely open again tomorrow; yet tomorrow the vegetables may be fresher,
+> the people no livelier — truly, no livelier.
+
+**Why not just tell the model "write like Lu Xun"?** One archived blind test
+(prompt: "dusk") answered with numbers — Burrows Delta author distance,
+lower = closer to Lu Xun:
+
+| Lu Xun originals (in-corpus) | AI, told to imitate | AI with style pack | Zhu Ziqing (wrong-author control) |
+|:---:|:---:|:---:|:---:|
+| 0.87–1.04 | 1.69 | 1.54 | 2.36 |
+
+The ordering is exactly right, and the pack pulled the model 0.16 closer —
+but still **outside the true-corpus envelope**, and the tool tells you so
+honestly. "Does it feel like the author" becomes a number, not a vibe:
+which dimensions match and which fall short is itemized in every report.
+
 ## Local workbench
 
 Full workflow without touching a terminal (Windows): double-click
