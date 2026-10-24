@@ -69,7 +69,7 @@ API key，即可蒸馏新作者、写章节、跑盲测。仅监听 127.0.0.1，
 
 ```bash
 git clone https://github.com/Yunmoli1/novels-of-style.git
-cd novels-of-style/stylepack
+cd novels-of-style
 # 双击 启动工作台.bat（首次自动装 web 依赖并打开浏览器）
 # 引导四步：配 key → 选模型 → 新建项目 → 写第一章
 ```

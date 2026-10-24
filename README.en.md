@@ -69,7 +69,7 @@ stay invisible to consumers until validated and published.
 
 ```bash
 git clone https://github.com/Yunmoli1/novels-of-style.git
-cd novels-of-style/stylepack
+cd novels-of-style
 # double-click 启动工作台.bat (auto-installs web deps, opens the browser)
 # onboarding: API key → model → new project → first chapter
 ```
