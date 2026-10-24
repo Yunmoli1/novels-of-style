@@ -486,7 +486,14 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
     (out_dir / "packs").mkdir(exist_ok=True)
     (out_dir / "style.css").write_text(CSS, encoding="utf-8", newline="\n")
 
-    judging_data = splib.load_json(repo / "evals" / "human_judging.json")
+    # 判读数据 = 本机工作数据（含甲乙全文，2026-10-24 起不入库）——
+    # 缺失时（CI/新 clone）降级：跳过判读台页，站点其余照建
+    jp = repo / "evals" / "human_judging.json"
+    if jp.is_file():
+        judging_data = splib.load_json(jp)
+    else:
+        judging_data = None
+        print("提示：evals/human_judging.json 不存在——跳过判读台页（本机判读数据，不入库）")
     stamp = datetime.date.today().isoformat()
 
     (out_dir / "index.html").write_text(layout("门户", f"""<h1>StylePack 本地工作台</h1>
@@ -500,8 +507,9 @@ def build(out_dir: Path, repo: Path = ROOT) -> Path:
 <p class="meta">构建日期：{stamp} · 引文 ≤200 字；语料全文与判读答案永不进入本站点。</p>""", "home"),
                      encoding="utf-8", newline="\n")
 
-    (out_dir / "judging" / "index.html").write_text(
-        render_judging(judging_data, stamp), encoding="utf-8", newline="\n")
+    if judging_data is not None:  # 降级：无判读数据不建判读台（入口页链接仍指 /judging/ 由测试按存在性跳过）
+        (out_dir / "judging" / "index.html").write_text(
+            render_judging(judging_data, stamp), encoding="utf-8", newline="\n")
 
     cards = []
     for d, is_local in packs:

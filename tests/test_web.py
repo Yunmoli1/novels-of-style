@@ -62,10 +62,12 @@ class TestBuildSite(unittest.TestCase):
         self.content = "\n".join(p.read_text(encoding="utf-8") for p in self.pages)
 
     def test_pages_exist(self):
-        for rel in ("index.html", "judging/index.html", "packs/index.html",
-                    "packs/luxun/index.html", "packs/zhuziqing/index.html",
-                    "canon/index.html", "canon/zhuifang/index.html",
-                    "style.css"):
+        rels = ["index.html", "packs/index.html", "packs/luxun/index.html",
+                "packs/zhuziqing/index.html", "canon/index.html",
+                "canon/zhuifang/index.html", "style.css"]
+        if (S / "evals" / "human_judging.json").is_file():  # 判读台仅本机有数据时构建
+            rels.insert(1, "judging/index.html")
+        for rel in rels:
             self.assertTrue((self.site / rel).is_file(), rel)
 
     def test_canon_page_renders_terms_and_roster(self):
@@ -98,6 +100,8 @@ class TestBuildSite(unittest.TestCase):
                                 f"stylepacks/{child.name} 缺 pack.json，违反包家园结构守卫")
 
     def test_judging_inline_js_balanced(self):
+        if not (self.site / "judging" / "index.html").is_file():
+            self.skipTest("无判读数据，判读台未构建")
         """锁死 v0.5.2 的判读台全失效根因：f-string 丢括号致整段 JS 语法错误
         （症状：计数器停在 0/8、localStorage 永不写入、切页不恢复）。"""
         import re as _re
@@ -127,7 +131,10 @@ class TestBuildSite(unittest.TestCase):
         self.assertIn("永不进判定", t)
 
     def test_judging_page_rounds_without_answers(self):
-        j = (self.site / "judging" / "index.html").read_text(encoding="utf-8")
+        jp = (self.site / "judging" / "index.html")
+        if not jp.is_file():  # 无本机判读数据时构建降级（2026-10-24 起不入库）
+            self.skipTest("无判读数据，判读台未构建")
+        j = jp.read_text(encoding="utf-8")
         for word in ("回合 1", "回合 8", "冬天的集市", "老宅的院子", "导出判读结果"):
             self.assertIn(word, j)
         for bad in ("乙甲乙甲甲乙乙乙", "packed_arm", "subagent_winner"):
