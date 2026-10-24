@@ -864,6 +864,36 @@ class TestWebServer(unittest.TestCase):
                               params={"project": "../stylepacks"})
         self.assertEqual(bad.status_code, 400)
 
+    def test_history_sessions_and_costs(self):
+        """v0.9.5 历史页：sessions 列表（门禁/总账概览）+ 详情（立意/拍子/预览，
+        不搬全文）+ cost 行；文件名穿越拒绝。"""
+        r = self.client.get("/app/api/history/sessions",
+                            params={"project": "测试项目"})
+        self.assertEqual(r.status_code, 200)
+        rows = r.json()["sessions"]
+        self.assertTrue(rows)
+        row = next(x for x in rows if x["chapter_no"] == 2)
+        self.assertIn("夜谈", row["title"])
+        self.assertIn("fp_ok", row)
+        # 详情：立意在、全文不搬（只有预览）
+        d = self.client.get("/app/api/history/session_detail",
+                            params={"project": "测试项目", "file": row["file"]}).json()
+        self.assertEqual(d["chosen"]["title"], "方向A")
+        self.assertIn("text_preview", d)
+        self.assertNotIn("text", d)
+        # 成本行与累计
+        c = self.client.get("/app/api/history/costs",
+                            params={"project": "测试项目"}).json()
+        self.assertTrue(c["rows"])
+        self.assertGreater(c["total_tokens"], 0)
+        # 穿越
+        bad = self.client.get("/app/api/history/session_detail",
+                              params={"project": "测试项目", "file": "../../pack.json"})
+        self.assertEqual(bad.status_code, 404)
+        page = self.client.get("/app/history")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("每章消耗", page.text)
+
     def test_unconfigured_route_fails_clean(self):
         cfg = appstate.load_config(self.cfg_path)
         cfg["routing"]["write"] = None

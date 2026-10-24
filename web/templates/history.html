@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}历史{% endblock %}
+{% block main %}
+<style>
+  .bar{height:18px;background:var(--accent);border-radius:4px;min-width:2px;opacity:.85}
+  .bars{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+  .brow{display:grid;grid-template-columns:130px 1fr 90px;gap:8px;align-items:center;font-size:13px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11.5px;margin-left:6px}
+  .b-ok{background:rgba(123,196,127,.18);color:var(--good)}
+  .b-bad{background:rgba(224,133,133,.18);color:var(--bad)}
+  .b-na{background:var(--panel2);color:var(--muted)}
+</style>
+<h1>历史 · 章节与成本</h1>
+<p class="meta">每章交付的完整快照（sessions/）：立意、拍子、门禁报告、成本——可复判。
+正文全文在 manuscript/，此处为预览。</p>
+
+<div class="panel genrow">
+  <label>项目 <select id="project" onchange="loadAll()"></select></label>
+  <span class="meta" id="sum"></span>
+</div>
+
+<h2>章节</h2>
+<div id="chapters"></div>
+
+<h2>每章消耗（session_tokens，含重试与判官的真实总账）</h2>
+<div class="panel"><div class="bars" id="costbars"></div>
+<p class="meta">老记录无 session_tokens 字段的按单次调用 tokens 计（v0.6.8 前口径）。</p></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => (s || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+async function api(u) { const r = await fetch(u); if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.status); return r.json(); }
+function badge(ok, label) {
+  if (ok === null || ok === undefined) return `<span class="badge b-na">${label} 未跑</span>`;
+  return ok ? `<span class="badge b-ok">${label} ✓</span>` : `<span class="badge b-bad">${label} ✗</span>`;
+}
+async function loadAll() {
+  await loadProjects(); await loadSessions(); await loadCosts();
+}
+let projectsLoaded = false;
+async function loadProjects() {
+  if (!projectsLoaded) {
+    const d = await api('/app/api/projects');
+    $('project').innerHTML = d.projects.map(p => `<option>${esc(p.name)}</option>`).join('');
+    projectsLoaded = true;
+  }
+}
+async function loadSessions() {
+  const p = $('project').value;
+  $('chapters').innerHTML = '<p class="meta">载入中……</p>';
+  try {
+    const d = await api('/app/api/history/sessions?project=' + encodeURIComponent(p));
+    if (!d.sessions.length) { $('chapters').innerHTML = '<p class="meta">（该项目还没有交付记录）</p>'; return; }
+    $('chapters').innerHTML = d.sessions.map((s, i) => `
+      <div class="panel">
+        <strong>第 ${s.chapter_no} 章《${esc(s.title)}》</strong>
+        <span class="meta">${esc(s.ts)}｜${s.chars} 字｜${esc(s.model) || '?'}`
+        + (s.session_tokens ? `｜本章累计 ${(s.session_tokens / 1000).toFixed(1)}k tokens / ${s.session_calls} 次调用` : '')
+        + `｜包 ${esc(s.pack)}</span>
+        ${badge(s.fp_ok, '指纹')}${badge(s.aic_ok, 'AI腔')}${badge(s.ending === undefined ? null : !s.ending, '收尾')}
+        <details ontoggle="loadDetail(this, '${esc(s.file)}', ${i})"><summary class="meta">立意 / 拍子 / 报告 / 正文预览</summary>
+          <div id="det_${i}" class="meta">展开载入……</div></details>
+      </div>`).join('');
+  } catch (e) { $('chapters').innerHTML = '<p class="meta">' + e.message + '</p>'; }
+}
+async function loadDetail(detailsEl, file, i) {
+  if (!detailsEl.open) return;
+  const el = $('det_' + i);
+  if (el.dataset.loaded) return;
+  try {
+    const d = await api('/app/api/history/session_detail?project='
+      + encodeURIComponent($('project').value) + '&file=' + encodeURIComponent(file));
+    const ch = d.chosen || {};
+    const beats = (d.beats || []).map(b => `拍${b.no}：${esc((b.beat || '').slice(0, 100))}`).join('<br>');
+    const fp = ((d.checks || {}).fp_check || {}).report || '';
+    const aic = ((d.checks || {}).ai_cliche || {}).report || '';
+    const end = (d.checks || {}).ending || {};
+    el.innerHTML = `
+      <p><strong>立意</strong>：${esc(ch.title || '')}——${esc(ch.angle || '')}</p>
+      <p><strong>拍子</strong>：<br>${beats || '（无）'}</p>
+      <p><strong>fp_check</strong>：<br>${esc(fp.splitlines().slice(0, 3).join('<br>').replace(/</g, ''))}</p>
+      ${aic ? `<p><strong>AI 腔</strong>：<br>${esc(aic.splitlines()[0])}</p>` : ''}
+      ${end.reason ? `<p><strong>收尾</strong>：${end.violation ? '⚠ ' : '✓ '}${esc(end.reason)}</p>` : ''}
+      <div class="passage" style="max-height:40vh;overflow:auto">${esc(d.text_preview)}</div>`;
+    el.dataset.loaded = 1;
+  } catch (e) { el.textContent = '载入失败：' + e.message; }
+}
+async function loadCosts() {
+  const p = $('project').value;
+  try {
+    const d = await api('/app/api/history/costs?project=' + encodeURIComponent(p));
+    const rows = d.rows || [];
+    if (!rows.length) { $('costbars').innerHTML = '<p class="meta">（无成本记录）</p>'; $('sum').textContent = ''; return; }
+    const vals = rows.map(r => r.session_tokens || r.tokens || 0);
+    const mx = Math.max(...vals, 1);
+    $('costbars').innerHTML = rows.map((r, i) => `
+      <div class="brow"><span class="meta">${esc(r.date)} ${esc((r.note || '').slice(0, 12))}</span>
+      <div class="bar" style="width:${Math.max(2, vals[i] / mx * 100)}%"></div>
+      <span class="meta">${(vals[i] / 1000).toFixed(1)}k</span></div>`).join('');
+    $('sum').textContent = `累计 ${(d.total_tokens / 1000).toFixed(1)}k tokens（${rows.length} 条记录）`;
+  } catch (e) { $('costbars').innerHTML = '<p class="meta">' + e.message + '</p>'; }
+}
+loadAll();
+</script>
+{% endblock %}

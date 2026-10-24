@@ -62,6 +62,13 @@ def save_config(cfg: dict, path: Path | None = None) -> None:
     p = Path(path) if path else Path(cfg.get("_path") or DEFAULT_CONFIG_PATH)
     out = {k: v for k, v in cfg.items() if not k.startswith("_")}
     p.parent.mkdir(parents=True, exist_ok=True)
+    # 写前备份上一版（含 key 的本地文件损坏/误删时有救；.bak 同样被 gitignore 覆盖）
+    if p.is_file():
+        try:
+            bak = p.read_bytes()
+            p.with_suffix(".json.bak").write_bytes(bak)
+        except OSError:
+            pass
     p.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n",
                  encoding="utf-8", newline="\n")
 

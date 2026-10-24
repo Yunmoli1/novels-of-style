@@ -18,6 +18,15 @@
 - **零依赖**：所有脚本与 MCP server 仅用 Python 标准库（3.8+），无 pip / npm 安装
 - **长篇友好**：人设圣经、时间线、伏笔账本的一致性检查；逐章风格漂移检测
 - **诚实档案**：每个包记录语料来源、采样方式与置信度；limits.md 明说哪几维模仿不了
+- **本地网页工作台（v0.5–v0.9）**：双击即用的本地控制台（仅监听 127.0.0.1）——
+  **创作环**（装配预览所见即所发 → 立意 → 拍子 → 流式生成 → 四道门 → 交付，
+  5 个可重放方案槽、多批草稿、按报告修订/局部改写、字数挡位）；
+  **蒸馏台**（上传语料 → 指纹体检 → LLM 精读 → 九章草案 → 逐节校订 →
+  validate 定稿 + 网页盲测验收——"加一个新作者"全程网页闭环）；
+  **记忆层接入**（交付即登记章节摘要/状态变更/伏笔，隔离区按风险确认合并，
+  下一章自动带前情提要）；历史与成本页（每章真实总账可视化）；
+  AI 腔检测门、World Info 式装配（常驻/递归/优先级）。自带模型配置层
+  （BYO key 只存服务端、按模块路由、乐观锁）
 
 ## 快速开始（3 分钟）
 
@@ -31,6 +40,8 @@ python scripts/export_pack.py stylepacks/luxun --out my.stylepack.md
 
 # 3a. 有 agent 宿主 → 安装 skills 后走 style-setup 引导（各宿主路径见 docs/adapters/）
 # 3b. 没有任何宿主 → 把 my.stylepack.md 贴进对话，说"按这个文风写一段冬天的集市"
+# 3c. 想要图形界面 → 双击 启动工作台.bat（Windows；自动装 web 依赖并打开浏览器；
+#     配好自己的 API key 即可在网页里蒸馏新作者、写章节、跑盲测）
 ```
 
 完整流程见 **[docs/usage.md](docs/usage.md)**（使用说明书）。
@@ -42,8 +53,9 @@ canonpacks/      canon 包唯一家园（世界观 / 二创约束，自写内容
 core/skills/     12 个技能：建档、写作、批改、验收、一致性、反馈、精读、盲测…
 docs/            使用说明、宿主适配、写作参考（docs/references/）
 schemas/         pack.json JSON Schema（版本化）
-scripts/         零依赖脚本：ingest / fp_extract / fp_check / validate / export / story / cost…
+scripts/         零依赖脚本：ingest / fp_extract / fp_check / ai_cliche_check / validate / export / story / cost…
 server/          MCP server（JSON-RPC stdio，10 工具）+ 状态机 store
+web/             本地网页工作台（引擎层仍零依赖；web/ 隔离 fastapi/uvicorn/httpx/jinja2）
 stylepacks/      作者风格包唯一家园：顶层 = 公版包（自带 luxun、zhuziqing 示例）；
                  local/ = 非公版本地包（gitignore：license 为"不得公开再分发"，
                  本地工作台可枚举、永不入库不入 zip）
@@ -59,12 +71,19 @@ stylepacks/      作者风格包唯一家园：顶层 = 公版包（自带 luxun
 
 版本决策与设计取舍的完整记录见 [CHANGELOG.md](CHANGELOG.md)。
 
-## 路线图
+## 路线图（已交付节奏见 CHANGELOG）
 
-- **v0.3（当前）**：思想层——thought.md 蒸馏"思路的动作"（立意招式 / 观察清单 /
-  价值姿态 / 意象系统，motif 脚本验证 + advisory 不进判定）+ 立意共创与交付声明制
-- **后续**：验收端调子分区（--stratum）、跨作者风格区间、game / learning 类型包、
-  思想盲测轮值、社区档案征集
+- **v0.2–v0.4**：分层指纹与真迹包络、MCP 记忆层、思想层（thought 六节）、
+  三仪交叉终审与归因仪器、借句检查
+- **v0.5**：canon 层（二创原作档案）+ 判读台与测量可视化站点 + 包统一管理
+- **v0.6**：创作环最小闭环（模型配置层/状态机/三道门→四道门）与硬化
+  （空稿防御、字数挡位、流式生成现场、方案槽、截断重试、防缩水）
+- **v0.7–v0.8**：蒸馏台三阶段（入库指纹体检 / LLM 精读 / 草案定稿）+
+  网页盲测验收（胜率入账）；真模型全流程验收（鲁迅语料 → 网页蒸馏包）
+- **v0.9（当前）**：记忆接入创作环（隔离区/前情提要）、AI 腔检测门、
+  装配 World Info 化（常驻/递归/优先级）、卷级大纲/局部改写/导出、
+  历史与成本页、UI 打磨（toast/导航分组/焦点可访问性）
+- **后续**：检索模块网页点亮、判官异源、思想盲测轮值、社区档案征集
 
 ## 许可与贡献
 
