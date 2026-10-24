@@ -157,7 +157,10 @@ class TestBuildSite(unittest.TestCase):
         self.assertGreater(checked, 0)
 
     def test_judging_json_invariants(self):
-        j = json.loads((S / "evals" / "human_judging.json").read_text(encoding="utf-8"))
+        p = S / "evals" / "human_judging.json"
+        if not p.is_file():  # 判读结果=工作数据不入库（含甲乙全文），CI 无此文件
+            self.skipTest("本机无判读结果文件（2026-10-24 起解除追踪）")
+        j = json.loads(p.read_text(encoding="utf-8"))
         self.assertEqual(len(j["rounds"]), 8)
         for r in j["rounds"]:
             self.assertTrue(r["甲"].strip() and r["乙"].strip(), r["id"])
