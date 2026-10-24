@@ -1,42 +1,108 @@
+<div align="center">
+
 # StylePack
 
-**Open-source plugin that gives any AI agent the ability to distill, store, and imitate an author's writing style. Self-contained, verifiable, cross-platform.**
+**Open-source writing engine that gives any AI the style of a specific author.**
 
-StylePack distills an author's style into a **self-contained style pack**: quantitative fingerprints + generative guidance + annotated exemplar quotes. Load it on demand when writing, then run automated fingerprint acceptance checks — style similarity becomes a measurable metric instead of a feeling.
+Quantified fingerprints · Self-contained style packs · Local workbench · Verifiable
+
+[![CI](https://github.com/Yunmoli1/novels-of-style/actions/workflows/ci.yml/badge.svg)](https://github.com/Yunmoli1/novels-of-style/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-3776ab.svg)](https://www.python.org)
+[![Engine: 0 deps](https://img.shields.io/badge/engine-0%20dependencies-green.svg)](README.md)
+
+[Quick start](#quick-start) · [中文文档](README.md)
+
+</div>
+
+---
+
+StylePack distills an author into a **self-contained style pack**: quantitative
+fingerprints + generative guidance + annotated exemplar quotes. Load on demand,
+verify after every chapter — "does it feel like the author" becomes a
+**measurable metric**.
 
 ```
-collect → quantify → distill → human-review → apply → fingerprint check → feedback → iterate
+ingest corpus → fingerprint checkup → close reading → human review → publish
+   → assemble → streaming generation → 4 advisory gates → deliver & account
+   → memory registration → feedback loop
 ```
 
-## Highlights
+## Local workbench
 
-- **Self-contained**: a pack needs no source corpus and no plugin; `export` compiles it into a single Markdown file you can paste into any bare agent chat
-- **Verifiable**: sentence-length distribution, dialogue ratio, punctuation fingerprint, reduplication rate — each with tolerance thresholds, checked per chapter to catch style drift
-- **Cross-platform**: works with any host that supports Agent Skills directories and/or MCP; single-file packs work anywhere (per-host setup in [docs/adapters/](docs/adapters/))
-- **Zero dependencies**: all scripts are Python stdlib only (3.8+)
-- **Long-form friendly**: character bible, timeline and foreshadowing consistency checks; per-chapter drift detection
-- **Honest profiles**: every pack records corpus provenance, sampling method and confidence; `limits.md` states plainly which dimensions cannot be imitated
+Full workflow without touching a terminal (Windows): double-click
+`启动工作台.bat`, plug in your own API key, then distill new authors, write
+chapters, and run blind tests. Listens on 127.0.0.1 only; keys never leave
+your machine.
+
+| Creation loop | Distillation |
+|---|---|
+| ![Create](docs/images/workbench-create.jpg) | ![Distill](docs/images/workbench-distill.jpg) |
+
+What-you-see-is-what-gets-sent assembly preview → collaborative premise →
+beat sheet → streaming generation → four gates (fingerprint / borrowed-lines /
+AI-cliché / ending check) → revise-by-report / fragment rewrite → delivery
+with automatic cost accounting. Six-step web distillation closes the loop for
+"adding a new author"; blind-test win rate before publishing; draft packs
+stay invisible to consumers until validated and published.
+
+## Features
+
+- **Verifiable** — sentence-length / dialogue-ratio / punctuation /
+  reduplication metrics with tolerances + Burrows Delta author distance;
+  borrowed-line check; AI-cliché detector; web blind-test win rates
+- **Self-contained** — `export` a single-file pack, paste into any bare agent chat
+- **Three front-ends, one engine** — local workbench · Agent Skills & MCP
+  (12 skills + 10 memory tools) · CLI (every web button prints its CLI equivalent)
+- **Long-form memory** — chapter digests / entity changes / foreshadowing with
+  risk-graded quarantine merges; World-Info-style assembly (resident entries /
+  recursive association / priority-trimmed budget)
+- **Honest packs** — corpus provenance, sampling and confidence recorded;
+  limits.md states which dimensions can't be imitated; per-chapter cost ledger
+  includes real retry spend
+- **Zero-dependency engine** — scripts/ and the MCP server use only the Python
+  standard library (3.8+); web/ isolates fastapi/uvicorn/httpx/jinja2
 
 ## Quick start
 
+**A. Local workbench (easiest)**
+
 ```bash
-python scripts/validate_pack.py stylepacks/luxun     # built-in public-domain packs
-python scripts/export_pack.py stylepacks/luxun --out my.stylepack.md
-# Paste my.stylepack.md into any chat: "Write a winter market scene in this style."
+git clone https://github.com/Yunmoli1/novels-of-style.git
+cd novels-of-style/stylepack
+# double-click 启动工作台.bat (auto-installs web deps, opens the browser)
+# onboarding: API key → model → new project → first chapter
 ```
 
-Full guide: [docs/usage.md](docs/usage.md) (Chinese; adapters in docs/adapters/).
+**B. Agent host (Claude Code / Codex-like)** — install the skills, follow
+`style-setup`; see docs/adapters/.
 
-## Layout
+**C. No host at all**
 
-`core/skills/` — 12 skills · `packs/` — genre packs · `stylepacks/` — style packs ·
-`schemas/` — JSON Schema · `scripts/` — stdlib-only tools · `evals/` — golden cases · `docs/`
+```bash
+python scripts/export_pack.py stylepacks/luxun --out my.stylepack.md
+# paste my.stylepack.md into any chat: "write a winter market scene in this style"
+```
 
-## Roadmap
+Public-domain sample packs included: **Lu Xun** (62 pieces, with tone registers)
+and **Zhu Ziqing**. Full manual: [docs/usage.md](docs/usage.md) (Chinese).
 
-v0.3 (current): thought layer — thought.md distills "how the author thinks" (idea moves,
-observation lists, stance, motif system; script-verified motifs, advisory only) with
-two-stage co-creation and delivery declaration ·
-later: acceptance-side registers (--stratum), cross-author style zones, genre packs.
+## Principles
 
-License: [Apache-2.0](LICENSE). Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) — copyright discipline applies: the repo never hosts copyrighted full texts; exemplars are short annotated quotes only.
+1. A plugin never changes the model — only the context it sees and the
+   procedures it follows.
+2. A pack is an operating manual, not a lab report — description
+   (fingerprint) + generation (guidance) + demonstration (exemplars).
+3. Models propose, scripts verify — verbatim quote checks, motif frequency
+   validation, fingerprint comparison; generated claims are never trusted.
+4. The repo ships no corpora — public-domain samples and short quotes only
+   (≤200 chars); full texts never enter the repository.
+5. Every paid action is previewed before it runs — costs are accounted
+   per chapter, retries included.
+
+## License
+
+[Apache-2.0](LICENSE). See [CONTRIBUTING.md](CONTRIBUTING.md) for pack
+submissions and the copyright discipline.
+
+中文文档：[README.md](README.md)
